@@ -1,0 +1,29 @@
+// @demo: a small working line of machines next to the player, along +x.
+//
+//   motor > shaft > speedometer > gearbox > shaft > cog > shaft > press > shaft > stressometer
+//   the gearbox also drives a fan (north); the cog meshes with a cog above
+//   it and that with a large cog; the press works on a depot under it.
+
+function buildDemo {
+    line l = default.location;
+    line ox = num.floor(line l.x) + 2;
+    line oy = num.floor(line l.y);
+    line oz = num.floor(line l.z);
+    line y = line oy + 1;
+    placeBlock("creative_motor", keyAt(line ox, line y, line oz), "x", "east");
+    placeBlock("shaft", keyAt(line ox + 1, line y, line oz), "x", "");
+    placeBlock("speedometer", keyAt(line ox + 2, line y, line oz), "x", "");
+    placeBlock("gearbox", keyAt(line ox + 3, line y, line oz), "y", "");
+    placeBlock("encased_fan", keyAt(line ox + 3, line y, line oz - 1), "z", "north");
+    placeBlock("shaft", keyAt(line ox + 4, line y, line oz), "x", "");
+    placeBlock("cogwheel", keyAt(line ox + 5, line y, line oz), "x", "");
+    placeBlock("cogwheel", keyAt(line ox + 5, line y + 1, line oz), "x", "");
+    placeBlock("large_cogwheel", keyAt(line ox + 5, line y + 2, line oz + 1), "x", "");
+    placeBlock("shaft", keyAt(line ox + 6, line y, line oz), "x", "");
+    placeBlock("mechanical_press", keyAt(line ox + 7, line y, line oz), "x", "");
+    placeBlock("depot", keyAt(line ox + 7, line oy, line oz), "y", "");
+    placeBlock("shaft", keyAt(line ox + 8, line y, line oz), "x", "");
+    placeBlock("stressometer", keyAt(line ox + 9, line y, line oz), "x", "");
+    placeBlock("hand_crank", keyAt(line ox + 10, line y, line oz), "x", "east");
+    placeBlock("millstone", keyAt(line ox + 1, line oy, line oz + 3), "y", "");
+}

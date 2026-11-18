@@ -37,6 +37,8 @@ declare global pSneak: dict[num];
 /** World collision cells read this tick: key -> [lo, hi] or [] for none. */
 declare global pCells: dict[list];
 declare global pCellsTick: num;
+/** 1: show proxy state on the action bar (@proxydbg). */
+declare global pDebug: num;
 
 function proxyHalfWidth(): num {
     return 0.3;
@@ -303,6 +305,12 @@ function proxyEnter(uuid: str, p: vec) {
     global pAway[uuid] = 0;
     global pRide[uuid] = -0.6;
     global pSneak[uuid] = 0;
+    if (global pDebug == 1) {
+        line qx = line q.x;
+        line qy = line q.y;
+        line qz = line q.z;
+        selected.sendMessage(s"<aqua>proxy in at %var(qx) %var(qy) %var(qz)");
+    }
     selected.rideEntity(line stand);
     selected.setEntityHidden(line body);
     selected.givePotionEffect(pot("Invisibility", 1, 1000000), showIcon="False", particles="None");
@@ -316,6 +324,12 @@ function proxyEnter(uuid: str, p: vec) {
 function proxyLeave(uuid: str) {
     line p = global pPos[uuid];
     line v = global pVel[uuid];
+    if (global pDebug == 1) {
+        line qx = p.x;
+        line qy = p.y;
+        line qz = p.z;
+        selected.sendMessage(s"<aqua>proxy out at %var(qx) %var(qy) %var(qz)");
+    }
     // not a proxy any more first, so the dismount event lets this one through
     global pMode[uuid] = 0;
     selected.rideEntity();
@@ -477,6 +491,11 @@ function proxyStep(uuid: str) {
         }
     }
     select playersByName(uuid);
+    if (global pDebug == 1) {
+        line qy = num.round(line q.y * 1000) / 1000;
+        line ride = global pRide[uuid];
+        selected.sendActionBar(s"<aqua>proxy</aqua> y %var(qy) ground %var(ground) ride %var(ride)");
+    }
     // still touching a Create block?
     if (touchesBE(line q, 0.25, 0.2) == 1) {
         global pAway[uuid] = 0;

@@ -140,7 +140,7 @@ function motorStep(key: str, down: num): num {
     }
     line v = (line steps[line i] as num) * line sign;
     global kCfg[key] = line v;
-    saved kSave[key] = "%var(global kType[key]) %var(global kAxis[key]) %var(global kFace[key]) %var(line v)";
+    saveBlock(key);
     global kGen[key] = line v * dirSign(global kFace[key] as str);
     markDirty(key);
     return line v;
@@ -555,7 +555,8 @@ function fanTick(key: str) {
  * (Create's fanProcessingTime) it turns into its result. */
 function fanProcess(id: str, kind: str) {
     select entitiesByName(id);
-    line t = num.parse("%var(selectedEntity.getTag(\"fan\"))") + 2;
+    line tg = selectedEntity.getTag("fan");
+    line t = num.parse("%var(tg)") + 2;
     line it = selectedEntity.entityItem;
     line r = fanResult(kind, itemId(line it));
     if (line r == "") {

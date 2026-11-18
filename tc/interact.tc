@@ -89,22 +89,19 @@ function lookHit(reach: num = 5): list {
     line hv = vec(line hit.x, line hit.y, line hit.z);
     line wd = (line hv - line o).len();
     if (line wd < reach - 0.01 && line wd < line best) {
+        // the face: trace the ray against the hit block's cube (a hit
+        // exactly on an edge would otherwise be ambiguous)
         line inside = line hv + line d * 0.001;
         line cell = vec(num.floor(line inside.x), num.floor(line inside.y), num.floor(line inside.z));
-        // the face: the side of the cell the hit point is on
-        line rel = line hv - line cell;
+        line bh = rayBox(line o, line d, line cell, line cell + vec(1, 1, 1));
         line face = "up";
-        line m = 1;
-        for (line ax of ["x", "y", "z"]) {
-            line a = line ax as str;
-            if (comp(line rel, line a) < line m) {
-                line m = comp(line rel, line a);
-                line face = axisDir(line a, -1);
-            }
-            if (1 - comp(line rel, line a) < line m) {
-                line m = 1 - comp(line rel, line a);
-                line face = axisDir(line a, 1);
-            }
+        if (line bh.len() == 2) {
+            line face = line bh[2] as str;
+            line wd = line bh[1] as num;
+            line hv = line o + line d * line wd;
+        }
+        if (line wd >= line best) {
+            return ["create", line bestKey, line bestFace, line best, line o + line d * line best];
         }
         return ["world", keyAt(line cell.x, line cell.y, line cell.z), line face, line wd, line hv];
     }
@@ -153,7 +150,11 @@ function placeOrient(t: str, face: str, look: vec, sneak: num, against: str): li
 /** The selected player right clicks. */
 function useClick {
     line uuid = selected.uuid;
-    if (dNum(global iLastUse, line uuid, -1) == game.ticksSinceStartup) {
+    if (global pDebug == 1) {
+        line last = dNum(global iLastUse, line uuid, -100);
+        selected.sendMessage(s"<gray>click, last use %var(last)");
+    }
+    if (game.ticksSinceStartup - dNum(global iLastUse, line uuid, -100) < 4) {
         return;
     }
     global iLastUse[line uuid] = game.ticksSinceStartup;
@@ -168,6 +169,10 @@ function useClick {
     line kind = line hit[1] as str;
     line key = line hit[2] as str;
     line face = line hit[3] as str;
+    if (global pDebug == 1) {
+        line now = game.ticksSinceStartup;
+        selected.sendMessage(s"<gray>use %var(now) hit %var(kind) %var(key) %var(face) block %var(blockT) tool %var(tool)");
+    }
     if (line tool == "goggles") {
         selected.setEquipmentItem(line held, slot="Head");
         selected.setEquipmentItem(item("air"), slot="Main hand");
@@ -224,7 +229,7 @@ function machineUse(key: str, held: item, sneak: num) {
         crankUse(key, sneak);
     } else if (line t == "creative_motor") {
         line v = motorStep(key, sneak);
-        selected.sendActionBar(s"<light_purple>Creative Motor</light_purple> <gray>set to</gray> <aqua>%var(line v) RPM</aqua>");
+        selected.sendActionBar(s"<light_purple>Creative Motor</light_purple> <gray>set to</gray> <aqua>%var(v) RPM</aqua>");
     } else if (line t == "depot" || line t == "millstone") {
         line items = itemsAt(key);
         if (line items.len() > 0 && (line t == "depot" || itemMat(held) == "air")) {
@@ -245,7 +250,8 @@ function machineUse(key: str, held: item, sneak: num) {
             depotDraw(key, "");
         }
     } else if (line t == "speedometer" || line t == "stressometer") {
-        selected.sendActionBar(s"%var(kineticReport(key))");
+        line rep = kineticReport(key);
+        selected.sendActionBar(s"%var(rep)");
     }
 }
 
@@ -276,7 +282,7 @@ function wrenchTurn(key: str) {
     if (line t == "creative_motor") {
         global kGen[key] = (global kCfg[key] as num) * dirSign(global kFace[key] as str);
     }
-    saved kSave[key] = "%var(line t) %var(global kAxis[key]) %var(global kFace[key]) %var(global kCfg[key])";
+    saveBlock(key);
     eraseBlock(key);
     drawBlock(key);
     markDirty(key);
@@ -322,6 +328,7 @@ function gogglesTick {
     }
     line hit = lookHit(8);
     if (line hit[1] == "create") {
-        selected.sendActionBar(s"%var(kineticReport(line hit[2] as str))");
+        line rep = kineticReport(line hit[2] as str);
+        selected.sendActionBar(s"%var(rep)");
     }
 }

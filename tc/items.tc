@@ -6,14 +6,16 @@
 
 function kitItem(t: str): item {
     line it = item("stone").setModel("create:" + t);
-    line it = line it.setName(s"<!i><white>%var(blockName(t))");
+    line n = blockName(t);
+    line it = line it.setName(s"<!i><white>%var(n)");
     return line it.setTag("create_block", t);
 }
 
 function toolItem(name: str): item {
     line names = {wrench: "Wrench", goggles: "Engineer's Goggles"};
     line it = item("stone").setModel("create:" + name);
-    line it = line it.setName(s"<!i><gold>%var(line names[name] as str)");
+    line n = line names[name] as str;
+    line it = line it.setName(s"<!i><gold>%var(n)");
     return line it.setTag("create_tool", name);
 }
 
@@ -25,7 +27,7 @@ function createItem(name: str, count: num = 1): item {
         line label = line names[name] as str;
     }
     line it = item("paper", count).setModel("create:" + name);
-    line it = line it.setName(s"<!i><white>%var(line label)");
+    line it = line it.setName(s"<!i><white>%var(label)");
     return line it.setTag("create_item", name);
 }
 
@@ -82,7 +84,8 @@ function itemMat(it: item): str {
 
 /** An item's text tag `name`, or "". */
 function tagOf(it: item, name: str): str {
-    line v = "%var(it.getTag(name))";
+    line g = it.getTag(name);
+    line v = "%var(g)";
     if (line v == "0") {
         return "";
     }

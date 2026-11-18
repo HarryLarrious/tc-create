@@ -48,6 +48,15 @@ function placeBlock(t: str, key: str, a: str, f: str, cfg: num = 0): num {
     return 1;
 }
 
+/** Writes block `key` to the saved list. */
+function saveBlock(key: str) {
+    line t = global kType[key];
+    line a = global kAxis[key];
+    line f = global kFace[key];
+    line c = global kCfg[key];
+    saved kSave[key] = "%var(t) %var(a) %var(f) %var(c)";
+}
+
 /** Drops every record of block `key` (not its entities). */
 function forgetBlock(key: str) {
     if (global kType.hasKey(key)) {

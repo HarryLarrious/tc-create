@@ -239,22 +239,28 @@ function kineticReport(key: str): str {
     line spd = num.round(num.abs(line s as num) * 10) / 10;
     line out = "<gold>" + blockName(line t) + "</gold>";
     if (line cap as num > 0 && line st as num > line cap as num) {
-        line out = line out + "  <red><b>OVERSTRESSED</b></red>  <gray>" + "%var(num.round(line st as num)) / %var(num.round(line cap as num)) su";
+        line sti = num.round(line st);
+        line capi = num.round(line cap);
+        line out = line out + "  <red><b>OVERSTRESSED</b></red>  <gray>%var(sti) / %var(capi) su";
         return line out;
     }
-    line kind = "<gray>Rotating at</gray> <aqua>%var(line spd) RPM</aqua>";
+    line kind = "<gray>Rotating at</gray> <aqua>%var(spd) RPM</aqua>";
     if (line s as num == 0 && line theo as num == 0) {
         line kind = "<gray>Not rotating</gray>";
     }
     line out = line out + "  " + line kind;
     if (blockImpact(line t) > 0) {
-        line out = line out + "  <gray>Impact</gray> <yellow>%var(num.round(blockImpact(line t) * num.abs(line s as num))) su</yellow>";
+        line imp = num.round(blockImpact(line t) * num.abs(line s));
+        line out = line out + "  <gray>Impact</gray> <yellow>%var(imp) su</yellow>";
     }
     if (blockCapacity(line t) > 0) {
-        line out = line out + "  <gray>Capacity</gray> <green>%var(num.round(blockCapacity(line t) * num.abs((genAt(key)) as num))) su</green>";
+        line cp = num.round(blockCapacity(line t) * num.abs(genAt(key)));
+        line out = line out + "  <gray>Capacity</gray> <green>%var(cp) su</green>";
     }
     if (line cap as num > 0) {
-        line out = line out + "  <dark_gray>Network %var(num.round(line st as num)) / %var(num.round(line cap as num)) su</dark_gray>";
+        line sti = num.round(line st);
+        line capi = num.round(line cap);
+        line out = line out + "  <dark_gray>Network %var(sti) / %var(capi) su</dark_gray>";
     }
     return line out;
 }

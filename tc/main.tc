@@ -67,14 +67,48 @@ playerevent command {
         default.sendMessage(s"<gray>Removed every Create block.");
     } else if (line cmd == "reload") {
         rebuildAll();
-        default.sendMessage(s"<gray>Rebuilt %var(global kType.len()) blocks.");
+        line n = global kType.len();
+        default.sendMessage(s"<gray>Rebuilt %var(n) blocks.");
+    } else if (line cmd == "demo") {
+        buildDemo();
+        default.sendMessage(s"<gray>Built a demo line to the east. Right click the motor to speed it up.");
+    } else if (line cmd == "look") {
+        // @look pitch yaw: points the camera (for testing)
+        default.setRotation(num.parse(line words[2] as str), num.parse(line words[3] as str));
+    } else if (line cmd == "dbg") {
+        // every block: type, speed, generated speed, network
+        line nd = global kDirty.len();
+        line beat = global cLastBeat;
+        line now = game.ticksSinceStartup;
+        line lid = global cLoopId;
+        default.sendMessage(s"<yellow>dirty %var(nd) beat %var(beat) now %var(now) loop %var(lid)");
+        if (line words.len() > 1) {
+            line k1 = global kType.getKeys()[1] as str;
+            line links = kLinks(line k1);
+            line ln = line links.len();
+            line r = solveNetwork(line k1);
+            default.sendMessage(s"<yellow>%var(k1) links %var(ln) solve %var(r)");
+        }
+        for (line k of global kType.getKeys()) {
+            line t = global kType[line k as str];
+            line sp = speedAt(line k as str);
+            line g = genAt(line k as str);
+            line nt = netOf(line k as str);
+            line np = partsAt(line k as str).len();
+            default.sendMessage(s"<gray>%var(k) <white>%var(t)</white> speed %var(sp) gen %var(g) net %var(nt) parts %var(np)");
+        }
+    } else if (line cmd == "proxydbg") {
+        global pDebug = 1 - global pDebug;
     } else if (line cmd == "pack") {
         packSend();
     } else if (line cmd == "stats") {
-        default.sendMessage(s"<gray>%var(global kType.len()) blocks, %var(global netCap.len()) networks, CPU %var(num.round(game.cpuUsage))%.");
+        line nb = global kType.len();
+        line nn = global netCap.len();
+        line cpu = num.round(game.cpuUsage);
+        default.sendMessage(s"<gray>%var(nb) blocks, %var(nn) networks, CPU %var(cpu)%.");
     } else if (line cmd == "help") {
         default.sendMessage(s"<gold>Create</gold> <gray>commands:");
-        default.sendMessage(s"<yellow>@kit</yellow> <gray>every block, a wrench and goggles");
+        default.sendMessage(s"<yellow>@kit</yellow> <gray>every block, a wrench and goggles; <yellow>@demo</yellow> <gray>builds a working line of machines east of you");
         default.sendMessage(s"<gray>Right click a face with a block to place it; left click breaks. Wrench: right click turns a block, sneak + right click picks it up. Goggles (right click to wear) show speed and stress.");
         default.sendMessage(s"<gray>Hand crank: right click (sneak: backwards). Creative motor: right click for faster, sneak + right click slower. Depot / millstone: right click to put an item in or take it out.");
         default.sendMessage(s"<yellow>@clearcreate</yellow> <gray>removes every block, <yellow>@reload</yellow> rebuilds them, <yellow>@stats</yellow>, <yellow>@pack</yellow>");
@@ -82,7 +116,8 @@ playerevent command {
 }
 
 function ensureLoop {
-    if (game.ticksSinceStartup - global cLastBeat > 5) {
+    // (also right after startup, when no loop has beaten yet)
+    if (global cLoopId == 0 || game.ticksSinceStartup - global cLastBeat > 5) {
         start createLoop;
     }
 }
