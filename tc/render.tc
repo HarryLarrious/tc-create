@@ -1,0 +1,202 @@
+// Drawing blocks: one item display per part (blocks.tc blockParts), an
+// interaction hitbox for clicks, and the packed spin color the pack's core
+// shader turns spinning parts with (pack/assets/minecraft/shaders/core/item.vsh).
+
+/** The custom model data color that makes the shader spin a part about axis
+ * a at `rpm`, pivoting on the center of block `key`. See item.vsh for the bit
+ * layout; built with plain arithmetic (DF numbers are doubles). */
+function kineticTint(a: str, rpm: num, large: num, key: str): num {
+    line p = keyVec(key);
+    line ax = crossAxes(a);
+    line pa = pmod(comp(line p, line ax[1]), 4);
+    line pb = pmod(comp(line p, line ax[2]), 4);
+    line half = num.clamp(num.round(rpm * 2), -1024, 1023);
+    if (line half < 0) {
+        line half += 2048;
+    }
+    return 262144 + axisIdx(a) * 65536 + large * 32768 + line pa * 8192 + line pb * 2048 + line half;
+}
+
+/** The item a part's display holds. */
+function partItem(model: str, tint: num): item {
+    line it = item("stone").setModel("create:part/" + model);
+    if (tint > 0) {
+        line it = line it.setModelDataNumbers(tint, type="Colors");
+    }
+    return line it;
+}
+
+/** Spawns block `key`'s displays and hitbox (after it is registered). */
+function drawBlock(key: str) {
+    line corner = keyVec(key);
+    line center = line corner + vec(0.5, 0.5, 0.5);
+    line specs = blockParts(key);
+    line ids: list[str] = [];
+    line speed = speedAt(key);
+    for (line sp of line specs) {
+        line s = line sp as list;
+        line tint = 0;
+        if (line s[2] as str != "") {
+            line tint = kineticTint(line s[2] as str, (line speed as num) * (line s[3] as num), line s[4] as num, key);
+        }
+        game.spawnItemDisplay(loc(line center.x, line center.y, line center.z), partItem(line s[1] as str, line tint));
+        lastEntity.setItemDisplayModelType(type="None");
+        lastEntity.setDisplayTransformationMatrix(displayMatrix(line s[5] as list[vec], line s[6] as vec));
+        lastEntity.setDisplayViewRange(96);
+        lastEntity.setTag("tccreate", key);
+        line ids.append(lastEntity.uuid);
+    }
+    global kParts[key] = line ids;
+    global kPartSpec[key] = line specs;
+    drawHitbox(key);
+    drawNeedles(key, 0);
+}
+
+/** The bounds of a block's shapes, [lo, hi] relative to its corner. */
+function shapeBounds(key: str): list[vec] {
+    line lo = vec(99, 99, 99);
+    line hi = vec(-99, -99, -99);
+    for (line b of blockShapes(key)) {
+        line bb = line b as list[vec];
+        line l = line bb[1];
+        line h = line bb[2];
+        line lo = vec(num.min(line lo.x, line l.x), num.min(line lo.y, line l.y), num.min(line lo.z, line l.z));
+        line hi = vec(num.max(line hi.x, line h.x), num.max(line hi.y, line h.y), num.max(line hi.z, line h.z));
+    }
+    return [line lo, line hi];
+}
+
+/** An interaction entity round the block's shapes (it catches clicks; it is
+ * square across, so it covers the larger side). */
+function drawHitbox(key: str) {
+    line c = keyVec(key);
+    line bb = shapeBounds(key);
+    line lo = line bb[1];
+    line hi = line bb[2];
+    line w = num.max(line hi.x - line lo.x, line hi.z - line lo.z);
+    line h = line hi.y - line lo.y;
+    if (global kType[key] == "large_water_wheel") {
+        // the ring is clicked through its own cells; the hitbox is the hub
+        line w = 1;
+        line h = 1;
+        line lo = vec(0, 0, 0);
+        line hi = vec(1, 1, 1);
+    }
+    game.spawnInteractionEntity(loc(line c.x + (line lo.x + line hi.x) * 0.5, line c.y + line lo.y, line c.z + (line lo.z + line hi.z) * 0.5), line w, line h, responsive="Enable");
+    lastEntity.setTag("tccreate", key);
+    global kHit[key] = lastEntity.uuid;
+}
+
+/** Removes block `key`'s displays and hitbox. */
+function eraseBlock(key: str) {
+    line ids = partsAt(key);
+    if (global kHit.hasKey(key)) {
+        line ids.append(global kHit[key]);
+    }
+    for (line id of line ids) {
+        select entitiesByName(line id as str);
+        selectedEntity.remove();
+    }
+    select reset;
+    global kParts.remove(key);
+    global kPartSpec.remove(key);
+    global kHit.remove(key);
+}
+
+/** Redraws the speed of every spinning part of block `key`. */
+function drawSpeed(key: str) {
+    line ids = global kParts[key] as list[str];
+    line specs = global kPartSpec[key] as list;
+    line speed = global kSpeed[key] as num;
+    repeat (line i to line ids.len()) {
+        line s = line specs[line i] as list;
+        if (line s[2] as str != "") {
+            select entitiesByName(line ids[line i]);
+            selectedEntity.setItemDisplayItem(partItem(line s[1] as str, kineticTint(line s[2] as str, line speed * (line s[3] as num), line s[4] as num, key)));
+            select reset;
+        }
+    }
+    drawNeedles(key, 10);
+}
+
+/** The display UUID of block `key`'s part with role `role`, or "". */
+function partWithRole(key: str, role: str): str {
+    line specs = specsAt(key);
+    line ids = partsAt(key);
+    repeat (line i to line specs.len()) {
+        if (((line specs[line i]) as list)[7] as str == role) {
+            return line ids[line i] as str;
+        }
+    }
+    return "";
+}
+
+/** Moves a part with role `role` to `offset` (blocks from the block center)
+ * over `ticks` ticks. */
+function movePart(key: str, role: str, offset: vec, ticks: num) {
+    line id = partWithRole(key, role);
+    if (line id == "") {
+        return;
+    }
+    line specs = global kPartSpec[key] as list;
+    line m = blockOrient(key);
+    select entitiesByName(line id);
+    selectedEntity.setDisplayInterpolation(ticks, 0);
+    selectedEntity.setDisplayTransformationMatrix(displayMatrix(line m, offset));
+    select reset;
+}
+
+/** Where a gauge's needles point, 0..1 of the dial (Create's
+ * GaugeBlockEntity dial values: speed is eased in three stretches, stress is
+ * the share of capacity in use, past 1 when overstressed). */
+function gaugeValue(key: str): num {
+    line t = global kType[key] as str;
+    if (line t == "speedometer") {
+        line s = num.abs(global kSpeed[key] as num);
+        if (line s == 0) {
+            return 0;
+        } else if (line s < 30) {
+            return line s / 30 * 0.45;
+        } else if (line s < 100) {
+            return 0.45 + (line s - 30) / 70 * 0.3;
+        }
+        return num.min(1.125, 0.75 + (line s - 100) / 156 * 0.375);
+    } else if (line t == "stressometer") {
+        line n = netOf(key);
+        line cap = capOf(line n);
+        if (line cap <= 0) {
+            return 0;
+        }
+        return num.min(1.125, stressOf(line n) / line cap);
+    }
+    return -1;
+}
+
+/** Turns a gauge's needles to its value (no-op for other blocks). */
+function drawNeedles(key: str, ticks: num) {
+    line v = gaugeValue(key);
+    if (line v < 0) {
+        return;
+    }
+    // 0 is lower left (-135 degrees), 1 lower right (+135), clockwise
+    line ang = -135 + line v * 270;
+    for (line d of allDirs()) {
+        if (dirAxis(line d as str) != global kAxis[key]) {
+            line id = partWithRole(key, "needle " + (line d as str));
+            if (line id != "") {
+                select entitiesByName(line id);
+                selectedEntity.setDisplayInterpolation(ticks, 0);
+                selectedEntity.setDisplayTransformationMatrix(displayMatrix(matMul(northTo(line d as str), rotZ(0 - line ang)), vec(0, 0, 0)));
+                select reset;
+            }
+        }
+    }
+}
+
+/** Removes every display and hitbox this project spawned (also ones left
+ * behind by an earlier run of the plot). */
+function eraseAllEntities {
+    select entitiesByCondition (entity.hasTag("tccreate"));
+    selectedEntity.remove();
+    select reset;
+}

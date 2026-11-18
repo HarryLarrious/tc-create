@@ -1,0 +1,247 @@
+// Small helpers: block keys, directions and axes, 3x3 orientation matrices.
+//
+// A block's key is "x,y,z" (its integer block coordinates). Directions are
+// Minecraft's names: up down north south east west. Axes are "x" "y" "z".
+
+/** The key of the block at integer coordinates. */
+function keyAt(x: num, y: num, z: num): str {
+    return "%var(x),%var(y),%var(z)";
+}
+
+/** The key of the block holding a point. */
+function keyOfVec(v: vec): str {
+    return keyAt(num.floor(v.x), num.floor(v.y), num.floor(v.z));
+}
+
+/** The block coordinates of a key, as a vector (its lowest corner). */
+function keyVec(key: str): vec {
+    line p = key.split(",");
+    return vec(num.parse(line p[1] as str), num.parse(line p[2] as str), num.parse(line p[3] as str));
+}
+
+/** The key next to `key` toward direction d. */
+function keyStep(key: str, d: str): str {
+    line v = keyVec(key) + dirVec(d);
+    return keyAt(line v.x, line v.y, line v.z);
+}
+
+function dirVec(d: str): vec {
+    if (d == "up") {
+        return vec(0, 1, 0);
+    } else if (d == "down") {
+        return vec(0, -1, 0);
+    } else if (d == "north") {
+        return vec(0, 0, -1);
+    } else if (d == "south") {
+        return vec(0, 0, 1);
+    } else if (d == "east") {
+        return vec(1, 0, 0);
+    }
+    return vec(-1, 0, 0);
+}
+
+/** The direction nearest to a vector. */
+function dirOfVec(v: vec): str {
+    line ax = num.abs(v.x);
+    line ay = num.abs(v.y);
+    line az = num.abs(v.z);
+    if (line ay >= line ax && line ay >= line az) {
+        if (v.y >= 0) {
+            return "up";
+        }
+        return "down";
+    }
+    if (line ax >= line az) {
+        if (v.x >= 0) {
+            return "east";
+        }
+        return "west";
+    }
+    if (v.z >= 0) {
+        return "south";
+    }
+    return "north";
+}
+
+/** The horizontal direction nearest to a vector. */
+function hDirOfVec(v: vec): str {
+    return dirOfVec(vec(v.x, 0, v.z));
+}
+
+function dirOpp(d: str): str {
+    if (d == "up") {
+        return "down";
+    } else if (d == "down") {
+        return "up";
+    } else if (d == "north") {
+        return "south";
+    } else if (d == "south") {
+        return "north";
+    } else if (d == "east") {
+        return "west";
+    }
+    return "east";
+}
+
+function dirAxis(d: str): str {
+    if (d == "up" || d == "down") {
+        return "y";
+    } else if (d == "east" || d == "west") {
+        return "x";
+    }
+    return "z";
+}
+
+/** +1 for up, south and east (the positive directions), else -1. */
+function dirSign(d: str): num {
+    if (d == "up" || d == "south" || d == "east") {
+        return 1;
+    }
+    return -1;
+}
+
+/** The direction along an axis with a sign. */
+function axisDir(a: str, sign: num): str {
+    if (a == "x") {
+        if (sign > 0) {
+            return "east";
+        }
+        return "west";
+    } else if (a == "y") {
+        if (sign > 0) {
+            return "up";
+        }
+        return "down";
+    }
+    if (sign > 0) {
+        return "south";
+    }
+    return "north";
+}
+
+function axisIdx(a: str): num {
+    if (a == "x") {
+        return 0;
+    } else if (a == "y") {
+        return 1;
+    }
+    return 2;
+}
+
+/** A vector's component along an axis. */
+function comp(v: vec, a: str): num {
+    if (a == "x") {
+        return v.x;
+    } else if (a == "y") {
+        return v.y;
+    }
+    return v.z;
+}
+
+function allDirs(): list[str] {
+    return ["up", "down", "north", "south", "east", "west"];
+}
+
+/** The two axes across axis a, in x y z order. */
+function crossAxes(a: str): list[str] {
+    if (a == "x") {
+        return ["y", "z"];
+    } else if (a == "y") {
+        return ["x", "z"];
+    }
+    return ["x", "y"];
+}
+
+/** n mod m, never negative. */
+function pmod(n: num, m: num): num {
+    return ((n % m) + m) % m;
+}
+
+// ---------------------------------------------------------------- orientations
+//
+// A 3x3 matrix is a list of its three columns [X, Y, Z] (the images of the
+// model's x, y and z axes). The parts are modeled standing on the y axis
+// (spinning parts turn about y) or facing up.
+
+/** The rotation taking the model's +y to direction d (the "facing" turns). */
+function upTo(d: str): list[vec] {
+    if (d == "up") {
+        return [vec(1, 0, 0), vec(0, 1, 0), vec(0, 0, 1)];
+    } else if (d == "down") {
+        return [vec(1, 0, 0), vec(0, -1, 0), vec(0, 0, -1)];
+    } else if (d == "north") {
+        return [vec(1, 0, 0), vec(0, 0, -1), vec(0, 1, 0)];
+    } else if (d == "south") {
+        return [vec(1, 0, 0), vec(0, 0, 1), vec(0, -1, 0)];
+    } else if (d == "east") {
+        return [vec(0, -1, 0), vec(1, 0, 0), vec(0, 0, 1)];
+    }
+    return [vec(0, 1, 0), vec(-1, 0, 0), vec(0, 0, 1)];
+}
+
+/** The rotation taking the model's y axis onto axis a. */
+function alongAxis(a: str): list[vec] {
+    return upTo(axisDir(a, 1));
+}
+
+/** The rotation taking the model's x axis onto horizontal axis a, keeping y up. */
+function xTo(a: str): list[vec] {
+    if (a == "z") {
+        return [vec(0, 0, 1), vec(0, 1, 0), vec(-1, 0, 0)];
+    }
+    return [vec(1, 0, 0), vec(0, 1, 0), vec(0, 0, 1)];
+}
+
+/** The rotation taking the model's -z (its north face) to direction d. */
+function northTo(d: str): list[vec] {
+    if (d == "south") {
+        return [vec(-1, 0, 0), vec(0, 1, 0), vec(0, 0, -1)];
+    } else if (d == "east") {
+        return [vec(0, 0, 1), vec(0, 1, 0), vec(-1, 0, 0)];
+    } else if (d == "west") {
+        return [vec(0, 0, -1), vec(0, 1, 0), vec(1, 0, 0)];
+    } else if (d == "up") {
+        return [vec(1, 0, 0), vec(0, 0, 1), vec(0, -1, 0)];
+    } else if (d == "down") {
+        return [vec(1, 0, 0), vec(0, 0, -1), vec(0, 1, 0)];
+    }
+    return [vec(1, 0, 0), vec(0, 1, 0), vec(0, 0, 1)];
+}
+
+/** m * v */
+function matVec(m: list[vec], v: vec): vec {
+    return (m[1]) * v.x + (m[2]) * v.y + (m[3]) * v.z;
+}
+
+/** a * b */
+function matMul(a: list[vec], b: list[vec]): list[vec] {
+    return [matVec(a, b[1]), matVec(a, b[2]), matVec(a, b[3])];
+}
+
+/** A turn by `deg` degrees about the model's z axis (right-handed). */
+function rotZ(deg: num): list[vec] {
+    line c = num.cos(deg);
+    line s = num.sin(deg);
+    return [vec(line c, line s, 0), vec(0 - line s, line c, 0), vec(0, 0, 1)];
+}
+
+/** The 16 numbers of a display transformation (row-major) that draws an item
+ * display's model turned by m, scaled by s and moved by t. Item displays turn
+ * their item half a turn about y before drawing it, so the model's x and z
+ * columns are negated here to cancel that. */
+function displayMatrix(m: list[vec], t: vec, s: num = 1): list[num] {
+    line X = (m[1]) * (0 - s);
+    line Y = (m[2]) * s;
+    line Z = (m[3]) * (0 - s);
+    return [line X.x, line Y.x, line Z.x, t.x, line X.y, line Y.y, line Z.y, t.y, line X.z, line Y.z, line Z.z, t.z, 0, 0, 0, 1];
+}
+
+/** A model-space box (px, 0..16 about the block center 8,8,8) turned by m,
+ * as [min, max] in blocks relative to the block's lowest corner. */
+function turnBox(m: list[vec], b: list[num]): list[vec] {
+    line p0 = matVec(m, vec(b[1] - 8, b[2] - 8, b[3] - 8));
+    line p1 = matVec(m, vec(b[4] - 8, b[5] - 8, b[6] - 8));
+    line lo = vec(num.min(line p0.x, line p1.x), num.min(line p0.y, line p1.y), num.min(line p0.z, line p1.z));
+    line hi = vec(num.max(line p0.x, line p1.x), num.max(line p0.y, line p1.y), num.max(line p0.z, line p1.z));
+    return [line lo * 0.0625 + vec(0.5, 0.5, 0.5), line hi * 0.0625 + vec(0.5, 0.5, 0.5)];
+}

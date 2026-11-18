@@ -1,0 +1,141 @@
+// Every block's state, keyed by its block key "x,y,z" (util.tc keyAt).
+
+/** The block type (blocks.tc blockTypes). */
+declare global kType: dict[str];
+/** Its rotation axis: "x" "y" "z". */
+declare global kAxis: dict[str];
+/** Its facing for facing blocks (crank, motor, fan, drill), else "". */
+declare global kFace: dict[str];
+/** Its speed in RPM, signed about its axis' positive direction (Create's
+ * getSpeed: 0 while its network is overstressed). */
+declare global kSpeed: dict[num];
+/** The speed its network would give it without the stress limit. */
+declare global kTheo: dict[num];
+/** A source's generated speed (crank, motor, water wheel). */
+declare global kGen: dict[num];
+/** A source's config: the motor's set speed. */
+declare global kCfg: dict[num];
+/** 1 while a clutch or gearshift is powered by redstone. */
+declare global kPowered: dict[num];
+/** The block's display part UUIDs, in blockParts order. */
+declare global kParts: dict[list];
+/** The part specs the displays were drawn from (blockParts), to redraw speeds. */
+declare global kPartSpec: dict[list];
+/** The block's interaction hitbox UUID. */
+declare global kHit: dict[str];
+/** Which block owns a cell: every block owns its own cell; a large water
+ * wheel also owns the ring round it. */
+declare global kOwner: dict[str];
+/** The network (connected group) a block was last solved in. */
+declare global kNet: dict[num];
+/** Per block timers and counters (press cycle, crank time, millstone work). */
+declare global kTimer: dict[num];
+/** Per block items: a depot's item, a millstone's input and output. */
+declare global kItems: dict[list];
+/** Per network: stress capacity and stress (SU), and its block count. */
+declare global netCap: dict[num];
+declare global netStress: dict[num];
+declare global netSize: dict[num];
+declare global netNext: num;
+/** Blocks whose network must be solved again this tick. */
+declare global kDirty: dict[num];
+/** Blocks that tick (sources and machines). */
+declare global kTicking: dict[num];
+/** Blocks as saved across plot restarts: key -> "type axis face cfg". */
+declare saved kSave: dict[str];
+
+// ---------------------------------------------------------------- lookups
+// (a missing dictionary key reads as nothing; these give typed defaults)
+
+function typeAt(k: str): str {
+    if (global kType.hasKey(k)) {
+        return global kType[k];
+    }
+    return "";
+}
+
+function axisAt(k: str): str {
+    if (global kAxis.hasKey(k)) {
+        return global kAxis[k];
+    }
+    return "";
+}
+
+function speedAt(k: str): num {
+    if (global kSpeed.hasKey(k)) {
+        return global kSpeed[k];
+    }
+    return 0;
+}
+
+function theoAt(k: str): num {
+    if (global kTheo.hasKey(k)) {
+        return global kTheo[k];
+    }
+    return 0;
+}
+
+function genAt(k: str): num {
+    if (global kGen.hasKey(k)) {
+        return global kGen[k];
+    }
+    return 0;
+}
+
+function netOf(k: str): num {
+    if (global kNet.hasKey(k)) {
+        return global kNet[k];
+    }
+    return 0;
+}
+
+function itemsAt(k: str): list {
+    if (global kItems.hasKey(k)) {
+        return global kItems[k];
+    }
+    return [];
+}
+
+function partsAt(k: str): list {
+    if (global kParts.hasKey(k)) {
+        return global kParts[k];
+    }
+    return [];
+}
+
+function specsAt(k: str): list {
+    if (global kPartSpec.hasKey(k)) {
+        return global kPartSpec[k];
+    }
+    return [];
+}
+
+function capOf(net: num): num {
+    if (global netCap.hasKey("%var(net)")) {
+        return global netCap["%var(net)"];
+    }
+    return 0;
+}
+
+function stressOf(net: num): num {
+    if (global netStress.hasKey("%var(net)")) {
+        return global netStress["%var(net)"];
+    }
+    return 0;
+}
+
+/** d[k], or "" when it has no k. */
+function dStr(d: dict[str], k: str): str {
+    if (d.hasKey(k)) {
+        return d[k];
+    }
+    return "";
+}
+
+/** d[k], or def when it has no k. */
+function dNum(d: dict[num], k: str, def: num): num {
+    if (d.hasKey(k)) {
+        return d[k];
+    }
+    return def;
+}

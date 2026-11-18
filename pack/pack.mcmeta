@@ -1,0 +1,7 @@
+{
+  "pack": {
+    "description": "tc-create: Create-style kinetics for DiamondFire",
+    "min_format": [97, 1],
+    "max_format": [97, 1]
+  }
+}

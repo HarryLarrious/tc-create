@@ -1,0 +1,140 @@
+// Placing, removing and saving blocks.
+
+/** 1 if a block could go at `key`: no block of ours and no solid world block
+ * there (nor in the extra cells it would fill). */
+function cellFree(key: str): num {
+    if (global kOwner.hasKey(key)) {
+        return 0;
+    }
+    line v = keyVec(key);
+    line b = game.getBlockMaterial(loc(line v.x + 0.5, line v.y + 0.5, line v.z + 0.5), returnValue="Item");
+    if (line b.isSolid()) {
+        return 0;
+    }
+    return 1;
+}
+
+/** Places a block of type t at `key`. Returns 1 if it was placed. */
+function placeBlock(t: str, key: str, a: str, f: str, cfg: num = 0): num {
+    if (cellFree(key) == 0) {
+        return 0;
+    }
+    global kType[key] = t;
+    global kAxis[key] = a;
+    global kFace[key] = f;
+    for (line c of extraCells(key)) {
+        if (cellFree(line c as str) == 0) {
+            forgetBlock(key);
+            return 0;
+        }
+    }
+    global kOwner[key] = key;
+    for (line c of extraCells(key)) {
+        global kOwner[line c as str] = key;
+    }
+    global kSpeed[key] = 0;
+    global kTheo[key] = 0;
+    global kGen[key] = 0;
+    global kCfg[key] = cfg;
+    global kPowered[key] = 0;
+    global kTimer[key] = 0;
+    if (["hand_crank", "mechanical_press", "millstone", "encased_fan", "mechanical_drill", "water_wheel", "large_water_wheel", "clutch", "gearshift"].find(t) > 0) {
+        global kTicking[key] = 1;
+    }
+    saved kSave[key] = "%var(t) %var(a) %var(f) %var(cfg)";
+    drawBlock(key);
+    machinePlaced(key);
+    markDirty(key);
+    return 1;
+}
+
+/** Drops every record of block `key` (not its entities). */
+function forgetBlock(key: str) {
+    if (global kType.hasKey(key)) {
+        for (line c of extraCells(key)) {
+            global kOwner.remove(line c as str);
+        }
+    }
+    global kOwner.remove(key);
+    global kType.remove(key);
+    global kAxis.remove(key);
+    global kFace.remove(key);
+    global kSpeed.remove(key);
+    global kTheo.remove(key);
+    global kGen.remove(key);
+    global kCfg.remove(key);
+    global kPowered.remove(key);
+    global kTimer.remove(key);
+    global kItems.remove(key);
+    global kTicking.remove(key);
+    global kNet.remove(key);
+    saved kSave.remove(key);
+}
+
+/** Removes block `key`; its neighbours' networks are solved again. */
+function removeBlock(key: str) {
+    if (!global kType.hasKey(key)) {
+        return;
+    }
+    line near = netMembersNear(key);
+    machineRemoved(key);
+    eraseBlock(key);
+    forgetBlock(key);
+    for (line n of line near) {
+        markDirty(line n as str);
+    }
+}
+
+/** Breaks block `key` as if mined: particles, a sound, and its item dropped. */
+function popBlock(key: str, why: str = "") {
+    if (!global kType.hasKey(key)) {
+        return;
+    }
+    line t = global kType[key] as str;
+    line c = keyVec(key) + vec(0.5, 0.5, 0.5);
+    line at = loc(line c.x, line c.y, line c.z);
+    allPlayers.displayParticleEffect(par("Block", amount=30, spreadHoriz=0.3, spreadVert=0.3, material=blockMaterial(line t)), line at);
+    allPlayers.playSound(snd("Wood Break", 1, 0.9), line at);
+    game.spawnItem(kitItem(line t), line at);
+    if (why != "") {
+        allPlayers.sendActionBar(s"%var(why)");
+    }
+    removeBlock(key);
+}
+
+/** Puts back every saved block (after a plot restart, or @reload). */
+function rebuildAll {
+    eraseAllEntities();
+    line keep = saved kSave;
+    global kType = {};
+    global kAxis = {};
+    global kFace = {};
+    global kSpeed = {};
+    global kTheo = {};
+    global kGen = {};
+    global kCfg = {};
+    global kPowered = {};
+    global kParts = {};
+    global kPartSpec = {};
+    global kHit = {};
+    global kOwner = {};
+    global kNet = {};
+    global kTimer = {};
+    global kItems = {};
+    global netCap = {};
+    global netStress = {};
+    global netSize = {};
+    global kDirty = {};
+    global kTicking = {};
+    saved kSave = {};
+    for (line k of line keep.getKeys()) {
+        line w = (line keep[line k as str] as str).split(" ");
+        placeBlock(line w[1] as str, line k as str, line w[2] as str, line w[3] as str, num.parse(line w[4] as str));
+    }
+}
+
+/** Removes every block. */
+function clearAll {
+    saved kSave = {};
+    rebuildAll();
+}

@@ -1,0 +1,513 @@
+// Standing on Create blocks.
+//
+// Create's blocks here are display entities, which have no collision, and the
+// plot cannot change the client's own physics. So when a player touches one
+// of them while standing on something, they swap into a *proxy*: they ride an
+// invisible marker armor stand, and the plot moves that stand every tick with
+// Minecraft-style walking physics (the player's W/A/S/D, jump, sneak and
+// sprint keys, their look for direction) that collides with both the world's
+// blocks and the Create blocks' shapes (blocks.tc blockShapes). The camera
+// rides the stand, so it follows smoothly. A mannequin with the player's skin
+// walks in their place for everyone else (the real, seated player is hidden).
+// When they no longer touch any Create block, they swap back: dismounted at
+// the proxy's spot, keeping its velocity.
+//
+// The numbers are vanilla's (LivingEntity.travel): ground acceleration 0.1
+// (x1.3 sprinting, x0.3 sneaking) and friction 0.546 a tick, air acceleration
+// 0.02 and drag 0.91, gravity 0.08 with 0.98 drag, jump 0.42 (+0.2 forward
+// when sprinting), step height 0.6, and a 0.6 x 1.8 box.
+
+declare global pMode: dict[num];
+/** The stand and the mannequin per proxy player. */
+declare global pStand: dict[str];
+declare global pBody: dict[str];
+/** The proxy's feet (center of the box's bottom) and velocity (blocks/tick). */
+declare global pPos: dict[vec];
+declare global pVel: dict[vec];
+declare global pGround: dict[num];
+/** Ticks since the swap, and since it last touched a Create block. */
+declare global pTicks: dict[num];
+declare global pAway: dict[num];
+/** The rider's feet minus the stand's position, as measured. */
+declare global pRide: dict[num];
+/** 1 while the plot itself dismounts the player (the dismount event lets it). */
+declare global pLeaving: dict[num];
+/** 1 while sneaking (for the mannequin's pose). */
+declare global pSneak: dict[num];
+/** World collision cells read this tick: key -> [lo, hi] or [] for none. */
+declare global pCells: dict[list];
+declare global pCellsTick: num;
+
+function proxyHalfWidth(): num {
+    return 0.3;
+}
+
+function proxyHeight(): num {
+    return 1.8;
+}
+
+function inProxy(uuid: str): num {
+    if (global pMode.hasKey(uuid)) {
+        return global pMode[uuid];
+    }
+    return 0;
+}
+
+// ---------------------------------------------------------------- collision boxes
+
+/** The world block at a cell as a collision box [lo, hi] (full blocks; slabs
+ * as half blocks), or [] for one you walk through. Cached for the tick. */
+function worldBox(x: num, y: num, z: num): list {
+    if (global pCellsTick != game.ticksSinceStartup) {
+        global pCells = {};
+        global pCellsTick = game.ticksSinceStartup;
+    }
+    line key = keyAt(x, y, z);
+    if (global pCells.hasKey(line key)) {
+        return global pCells[line key];
+    }
+    line at = loc(x + 0.5, y + 0.5, z + 0.5);
+    line out = [];
+    if (game.getBlockMaterial(line at, returnValue="Item").isSolid()) {
+        line lo = vec(x, y, z);
+        line hi = vec(x + 1, y + 1, z + 1);
+        line m = game.getBlockMaterial(line at);
+        if (line m.contains("slab")) {
+            line half = game.getBlockData(line at, "type");
+            if (line half == "bottom") {
+                line hi = vec(x + 1, y + 0.5, z + 1);
+            } else if (line half == "top") {
+                line lo = vec(x, y + 0.5, z);
+            }
+        } else if (line m.contains("carpet")) {
+            line hi = vec(x + 1, y + 0.0625, z + 1);
+        }
+        line out = [line lo, line hi];
+    }
+    global pCells[line key] = line out;
+    return line out;
+}
+
+/** Every collision box ([lo, hi], world coordinates) touching the region lo..hi:
+ * world blocks and Create block shapes. `beOnly` leaves out the world. */
+function boxesIn(lo: vec, hi: vec, beOnly: num = 0): list {
+    line out = [];
+    line seen = {};
+    for (line x of range(num.floor(lo.x), num.floor(hi.x))) {
+        for (line y of range(num.floor(lo.y) - 1, num.floor(hi.y))) {
+            for (line z of range(num.floor(lo.z), num.floor(hi.z))) {
+                line key = keyAt(line x as num, line y as num, line z as num);
+                if (global kOwner.hasKey(line key)) {
+                    line own = global kOwner[line key];
+                    if (!line seen.hasKey(line own)) {
+                        line seen[line own] = 1;
+                        line c = keyVec(line own);
+                        for (line b of blockShapes(line own)) {
+                            line bb = line b as list[vec];
+                            line out.append([line c + line bb[1], line c + line bb[2]]);
+                        }
+                    }
+                } else if (beOnly == 0) {
+                    line w = worldBox(line x as num, line y as num, line z as num);
+                    if (line w.len() == 2) {
+                        line out.append(line w);
+                    }
+                }
+            }
+        }
+    }
+    return line out;
+}
+
+/** 1 if box a (lo, hi) and box b overlap by more than eps on every axis. */
+function boxesOverlap(alo: vec, ahi: vec, blo: vec, bhi: vec, eps: num = 0.001): num {
+    return alo.x < bhi.x - eps && ahi.x > blo.x + eps && alo.y < bhi.y - eps && ahi.y > blo.y + eps && alo.z < bhi.z - eps && ahi.z > blo.z + eps;
+}
+
+/** How far the box lo..hi can move by d along axis a before it hits one of
+ * `boxes` (it starts clear of them; boxes it already overlaps are passed). */
+function clipMove(boxes: list, lo: vec, hi: vec, a: str, d: num): num {
+    if (d == 0) {
+        return 0;
+    }
+    line out = d;
+    for (line b of boxes) {
+        line bb = line b as list[vec];
+        line blo = line bb[1];
+        line bhi = line bb[2];
+        // overlap on the two other axes?
+        line ok = 1;
+        for (line o of crossAxes(a)) {
+            line oa = line o as str;
+            if (comp(lo, line oa) >= comp(line bhi, line oa) - 0.0001 || comp(hi, line oa) <= comp(line blo, line oa) + 0.0001) {
+                line ok = 0;
+            }
+        }
+        if (line ok == 1) {
+            if (line out > 0 && comp(hi, a) <= comp(line blo, a) + 0.0001) {
+                line out = num.min(line out, comp(line blo, a) - comp(hi, a));
+            } else if (line out < 0 && comp(lo, a) >= comp(line bhi, a) - 0.0001) {
+                line out = num.max(line out, comp(line bhi, a) - comp(lo, a));
+            }
+        }
+    }
+    return line out;
+}
+
+/** Moves the box at feet `p` by `v` (y first, then the larger of x and z,
+ * like vanilla), clipped by `boxes`. Returns [new feet, moved vector]. */
+function sweep(boxes: list, p: vec, v: vec): list {
+    line w = proxyHalfWidth();
+    line h = proxyHeight();
+    line q = p;
+    line done = vec(0, 0, 0);
+    line order = ["y", "x", "z"];
+    if (num.abs(v.z) > num.abs(v.x)) {
+        line order = ["y", "z", "x"];
+    }
+    for (line ax of line order) {
+        line a = line ax as str;
+        line lo = line q - vec(line w, 0, line w);
+        line hi = line q + vec(line w, line h, line w);
+        line d = clipMove(boxes, line lo, line hi, line a, comp(v, line a));
+        line q = line q + axisUnit(line a) * line d;
+        line done = line done + axisUnit(line a) * line d;
+    }
+    return [line q, line done];
+}
+
+/** 1 if the player box at feet p, grown by `margin` across and `below`
+ * downward, touches a Create block shape. */
+function touchesBE(p: vec, margin: num, below: num): num {
+    line w = proxyHalfWidth() + margin;
+    line lo = p - vec(line w, below, line w);
+    line hi = p + vec(line w, proxyHeight(), line w);
+    for (line b of boxesIn(line lo, line hi, 1)) {
+        line bb = line b as list[vec];
+        if (boxesOverlap(line lo, line hi, line bb[1], line bb[2], 0)) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+/** Pushes feet p out of any Create block shape it is inside (the player
+ * walked a little way in before the swap): up onto it when it is low enough
+ * to step on, else out the nearest side. */
+function depenetrate(p: vec): vec {
+    line q = p;
+    repeat (3) {
+        line w = proxyHalfWidth();
+        line lo = line q - vec(line w, 0, line w);
+        line hi = line q + vec(line w, proxyHeight(), line w);
+        line moved = 0;
+        for (line b of boxesIn(line lo, line hi, 1)) {
+            line bb = line b as list[vec];
+            line blo = line bb[1];
+            line bhi = line bb[2];
+            if (line moved == 0 && boxesOverlap(line lo, line hi, line blo, line bhi)) {
+                line up = line bhi.y - line lo.y;
+                line px = line bhi.x - line lo.x;
+                line nx = line hi.x - line blo.x;
+                line pz = line bhi.z - line lo.z;
+                line nz = line hi.z - line blo.z;
+                line best = num.min(num.min(line px, line nx), num.min(line pz, line nz));
+                if (line up <= 0.6 && line up < line best + 0.6) {
+                    line q = line q + vec(0, line up + 0.001, 0);
+                } else if (line best == line px) {
+                    line q = line q + vec(line px + 0.001, 0, 0);
+                } else if (line best == line nx) {
+                    line q = line q - vec(line nx + 0.001, 0, 0);
+                } else if (line best == line pz) {
+                    line q = line q + vec(0, 0, line pz + 0.001);
+                } else {
+                    line q = line q - vec(0, 0, line nz + 0.001);
+                }
+                line moved = 1;
+            }
+        }
+    }
+    return line q;
+}
+
+/** 1 if the box at feet p stands on something (within 0.03 below). */
+function standsOn(p: vec, beOnly: num): num {
+    line w = proxyHalfWidth();
+    line lo = p - vec(line w, 0.03, line w);
+    line hi = p + vec(line w, 0, line w);
+    for (line b of boxesIn(line lo, line hi, beOnly)) {
+        line bb = line b as list[vec];
+        if (boxesOverlap(line lo, line hi, line bb[1], line bb[2], 0) && (line bb[2]).y <= p.y + 0.01) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+// ---------------------------------------------------------------- swapping
+
+/** Every tick, for the selected player: swap in or out of the proxy, and move it. */
+function proxyTick(uuid: str) {
+    if (inProxy(uuid) == 1) {
+        proxyStep(uuid);
+        return;
+    }
+    // cheap test first: any Create block in the cells round the feet?
+    line l = selected.location;
+    line p = vec(line l.x, line l.y, line l.z);
+    line near = 0;
+    for (line x of range(num.floor(line p.x - 0.5), num.floor(line p.x + 0.5))) {
+        for (line y of range(num.floor(line p.y) - 1, num.floor(line p.y) + 2)) {
+            for (line z of range(num.floor(line p.z - 0.5), num.floor(line p.z + 0.5))) {
+                if (global kOwner.hasKey(keyAt(line x as num, line y as num, line z as num))) {
+                    line near = 1;
+                }
+            }
+        }
+    }
+    if (line near == 0 || selected.gameMode == "spectator" || selected.isFlying()) {
+        return;
+    }
+    // touching one, and standing on the ground or on a Create block top?
+    if (touchesBE(line p, 0.08, 0.12) == 0) {
+        return;
+    }
+    if (selected.isGrounded() || standsOn(line p + vec(0, -0.1, 0), 1) == 1 || selected.velocity.y <= 0) {
+        proxyEnter(uuid, line p);
+    }
+}
+
+/** Swaps the selected player into a proxy at feet p. */
+function proxyEnter(uuid: str, p: vec) {
+    line v = selected.velocity;
+    line yaw = selected.location.getCoordinate(coord="Yaw");
+    line q = depenetrate(p);
+    game.spawnArmorStand(loc(line q.x, line q.y + 0.6, line q.z), visibility="Invisible (No hitbox)");
+    lastEntity.setMarker(marker="Enable");
+    lastEntity.setGravity(gravity="Disable");
+    lastEntity.setInvulnerable(invulnerable="Enable");
+    lastEntity.setTag("tcproxy", uuid);
+    line stand = lastEntity.uuid;
+    game.spawnMannequin(uuid, loc(line q.x, line q.y, line q.z, line yaw, 0), movable="False", mainHand="Right Hand");
+    lastEntity.setInvulnerable(invulnerable="Enable");
+    lastEntity.setGravity(gravity="Disable");
+    lastEntity.setTag("tcproxy", uuid);
+    line body = lastEntity.uuid;
+    global pMode[uuid] = 1;
+    global pStand[uuid] = line stand;
+    global pBody[uuid] = line body;
+    global pPos[uuid] = line q;
+    global pVel[uuid] = vec(v.x, num.max(v.y, -1), v.z);
+    global pGround[uuid] = 0;
+    global pTicks[uuid] = 0;
+    global pAway[uuid] = 0;
+    global pRide[uuid] = -0.6;
+    global pSneak[uuid] = 0;
+    selected.rideEntity(line stand);
+    selected.setEntityHidden(line body);
+    selected.givePotionEffect(pot("Invisibility", 1, 1000000), showIcon="False", particles="None");
+    // the seated player is hidden from everyone else; the mannequin walks for them
+    select playersByCondition (!player.nameEquals(uuid));
+    selected.setEntityHidden(uuid);
+    select playersByName(uuid);
+}
+
+/** Swaps the selected player back out of their proxy. */
+function proxyLeave(uuid: str) {
+    line p = global pPos[uuid];
+    line v = global pVel[uuid];
+    // not a proxy any more first, so the dismount event lets this one through
+    global pMode[uuid] = 0;
+    selected.rideEntity();
+    line yaw = selected.location.getCoordinate(coord="Yaw");
+    line pitch = selected.location.getCoordinate(coord="Pitch");
+    selected.teleport(loc(p.x, p.y, p.z, line yaw, line pitch), keepRot="True");
+    selected.setVelocity(line v);
+    selected.setFallDistance(0);
+    selected.removePotionEffect(pot("Invisibility"));
+    line ids = [global pStand[uuid], global pBody[uuid]];
+    select playersByCondition (!player.nameEquals(uuid));
+    selected.setEntityHidden(uuid, hidden="Disable");
+    for (line id of line ids) {
+        select entitiesByName(line id as str);
+        selectedEntity.remove();
+    }
+    select playersByName(uuid);
+    global pMode[uuid] = 0;
+    global pStand.remove(uuid);
+    global pBody.remove(uuid);
+}
+
+/** A player who leaves the plot while in a proxy: clean up its entities. */
+function proxyDrop(uuid: str) {
+    if (inProxy(uuid) == 0) {
+        return;
+    }
+    for (line id of [global pStand[uuid], global pBody[uuid]]) {
+        select entitiesByName(line id as str);
+        selectedEntity.remove();
+    }
+    select reset;
+    global pMode[uuid] = 0;
+}
+
+/** One physics tick of the selected player's proxy. */
+function proxyStep(uuid: str) {
+    line p = global pPos[uuid];
+    line v = global pVel[uuid];
+    line ground = global pGround[uuid];
+    global pTicks[uuid] += 1;
+    // keys
+    line fwd = 0;
+    line side = 0;
+    if (selected.isMovementKeyPressed(forward="Pressed")) {
+        line fwd += 1;
+    }
+    if (selected.isMovementKeyPressed(backward="Pressed")) {
+        line fwd -= 1;
+    }
+    if (selected.isMovementKeyPressed(left="Pressed")) {
+        line side += 1;
+    }
+    if (selected.isMovementKeyPressed(right="Pressed")) {
+        line side -= 1;
+    }
+    line jump = selected.isMovementKeyPressed(jump="Pressed");
+    line sneak = selected.isMovementKeyPressed(sneak="Pressed");
+    line sprint = selected.isMovementKeyPressed(sprint="Pressed") && line fwd > 0 && !line sneak;
+    line look = selected.location;
+    line yaw = line look.getCoordinate(coord="Yaw");
+    line F = vec(0 - num.sin(line yaw), 0, num.cos(line yaw));
+    line L = vec(num.cos(line yaw), 0, num.sin(line yaw));
+    line wish = line F * line fwd + line L * line side;
+    if (line wish.len() > 1) {
+        line wish = line wish.setLength(1);
+    }
+    line wish = line wish * 0.98;
+    // acceleration
+    line acc = 0.02;
+    if (line ground == 1) {
+        line acc = 0.1;
+    }
+    if (line sprint) {
+        line acc = line acc * 1.3;
+    }
+    if (line sneak && line ground == 1) {
+        line acc = line acc * 0.3;
+    }
+    line v = line v + line wish * line acc;
+    if (line jump && line ground == 1) {
+        line v.y = 0.42;
+        if (line sprint) {
+            line v = line v + line F * 0.2;
+        }
+    }
+    // move, with vanilla's step up onto low edges
+    line w = proxyHalfWidth();
+    line reach = num.abs(line v.x) + num.abs(line v.y) + num.abs(line v.z) + 1;
+    line boxes = boxesIn(line p - vec(line w + line reach, line reach, line w + line reach), line p + vec(line w + line reach, proxyHeight() + line reach, line w + line reach));
+    line r = sweep(line boxes, line p, line v);
+    line q = line r[1] as vec;
+    line moved = line r[2] as vec;
+    line hitX = num.abs(line moved.x - line v.x) > 0.0001;
+    line hitZ = num.abs(line moved.z - line v.z) > 0.0001;
+    line hitY = num.abs(line moved.y - line v.y) > 0.0001;
+    line landed = line hitY && line v.y < 0;
+    if ((line hitX || line hitZ) && (line ground == 1 || line landed)) {
+        // try again 0.6 higher, then back down
+        line up = sweep(line boxes, line p, vec(0, 0.6, 0));
+        line r2 = sweep(line boxes, line up[1] as vec, vec(line v.x, 0, line v.z));
+        line down = sweep(line boxes, line r2[1] as vec, vec(0, 0 - 0.6 - 0.01, 0));
+        line q2 = line down[1] as vec;
+        line d1 = vec(line q.x - line p.x, 0, line q.z - line p.z).len();
+        line d2 = vec(line q2.x - line p.x, 0, line q2.z - line p.z).len();
+        if (line d2 > line d1 + 0.001) {
+            line q = line q2;
+            line hitX = num.abs((line q2.x - line p.x) - line v.x) > 0.0001;
+            line hitZ = num.abs((line q2.z - line p.z) - line v.z) > 0.0001;
+            line landed = 1;
+        }
+    }
+    // sneaking keeps you on the edge you stand on
+    if (line sneak && line ground == 1 && standsOn(line q, 0) == 0) {
+        line q = vec(line p.x, line q.y, line p.z);
+    }
+    line ground = standsOn(line q, 0);
+    if (line hitX) {
+        line v.x = 0;
+    }
+    if (line hitZ) {
+        line v.z = 0;
+    }
+    if (line hitY) {
+        line v.y = 0;
+    }
+    // drag and gravity
+    line v.y = (line v.y - 0.08) * 0.98;
+    if (line ground == 1) {
+        line v = vec(line v.x * 0.546, line v.y, line v.z * 0.546);
+        if (line v.y < 0) {
+            line v.y = 0;
+        }
+    } else {
+        line v = vec(line v.x * 0.91, line v.y, line v.z * 0.91);
+    }
+    global pPos[uuid] = line q;
+    global pVel[uuid] = line v;
+    global pGround[uuid] = line ground;
+    // learn where the rider sits on the stand
+    line pl = selected.location;
+    select entitiesByName(global pStand[uuid]);
+    if (global pTicks[uuid] > 2) {
+        line seat = selectedEntity.location;
+        line meas = line pl.y - line seat.y;
+        if (num.abs(line meas) < 2) {
+            global pRide[uuid] = line meas;
+        }
+    }
+    selectedEntity.teleport(loc(line q.x, line q.y - global pRide[uuid], line q.z));
+    select entitiesByName(global pBody[uuid]);
+    selectedEntity.teleport(loc(line q.x, line q.y, line q.z, line yaw, line look.getCoordinate(coord="Pitch")));
+    if ((line sneak as num) != global pSneak[uuid]) {
+        global pSneak[uuid] = line sneak;
+        if (line sneak) {
+            selectedEntity.setPose(pose="Sneaking");
+        } else {
+            selectedEntity.setPose(pose="Standing");
+        }
+    }
+    select playersByName(uuid);
+    // still touching a Create block?
+    if (touchesBE(line q, 0.25, 0.2) == 1) {
+        global pAway[uuid] = 0;
+    } else {
+        global pAway[uuid] += 1;
+    }
+    if (global pAway[uuid] >= 3 && global pTicks[uuid] > 10) {
+        proxyLeave(uuid);
+    }
+}
+
+/** A fan's current pushes a proxy player (or a normal one, who is pushed
+ * directly) when they are in it. */
+function proxyFanPush(uuid: str, face: vec, F: vec, len: num, push: vec) {
+    line p = vec(0, 0, 0);
+    if (inProxy(uuid) == 1) {
+        line p = global pPos[uuid];
+    } else {
+        select playersByName(uuid);
+        line l = selected.location;
+        line p = vec(line l.x, line l.y, line l.z);
+    }
+    line ev = line p + vec(0, 0.9, 0) - face;
+    line along = line ev.dot(F);
+    line across = line ev - F * line along;
+    if (line along >= -0.2 && line along <= len && line across.len() < 1.0) {
+        if (inProxy(uuid) == 1) {
+            global pVel[uuid] = global pVel[uuid] + push;
+        } else {
+            selected.setVelocity(push, addToCurrentVel="True");
+        }
+    }
+    select reset;
+}

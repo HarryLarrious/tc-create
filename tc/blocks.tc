@@ -1,0 +1,263 @@
+// The block types: names, stress, how they connect, their collision shapes
+// and the display parts they are drawn with.
+//
+// Numbers follow Create (mc1.21.1/dev, MIT code): stress impact and capacity
+// are per RPM (AllBlocks.java CStress values, KineticNetwork: stress = impact
+// * |speed|, capacity = capacity * |generated speed|); shaft faces follow each
+// block's hasShaftTowards; shapes follow AllShapes.java.
+//
+// Every block has a rotation axis (kAxis) and, if it faces somewhere, a
+// facing (kFace).
+
+/** Every placeable type, in kit order. */
+function blockTypes(): list[str] {
+    return ["shaft", "cogwheel", "large_cogwheel", "gearbox", "clutch", "gearshift", "hand_crank", "creative_motor", "water_wheel", "large_water_wheel", "mechanical_press", "millstone", "encased_fan", "mechanical_drill", "depot", "speedometer", "stressometer"];
+}
+
+function blockName(t: str): str {
+    line names = {shaft: "Shaft", cogwheel: "Cogwheel", large_cogwheel: "Large Cogwheel", gearbox: "Gearbox", clutch: "Clutch", gearshift: "Gearshift", hand_crank: "Hand Crank", creative_motor: "Creative Motor", water_wheel: "Water Wheel", large_water_wheel: "Large Water Wheel", mechanical_press: "Mechanical Press", millstone: "Millstone", encased_fan: "Encased Fan", mechanical_drill: "Mechanical Drill", depot: "Depot", speedometer: "Speedometer", stressometer: "Stressometer"};
+    if (line names.hasKey(t)) {
+        return line names[t] as str;
+    }
+    return t;
+}
+
+/** How a type is turned when placed: "axis", "haxis" (x or z), "facing" or "none". */
+function blockOrientKind(t: str): str {
+    if (t == "hand_crank" || t == "creative_motor" || t == "encased_fan" || t == "mechanical_drill") {
+        return "facing";
+    } else if (t == "mechanical_press") {
+        return "haxis";
+    } else if (t == "millstone" || t == "depot") {
+        return "none";
+    }
+    return "axis";
+}
+
+/** Stress impact per RPM (CStress.setImpact). */
+function blockImpact(t: str): num {
+    line v = {encased_fan: 2, millstone: 4, mechanical_press: 8, mechanical_drill: 4};
+    if (line v.hasKey(t)) {
+        return line v[t] as num;
+    }
+    return 0;
+}
+
+/** Stress capacity per RPM (CStress.setCapacity). */
+function blockCapacity(t: str): num {
+    line v = {hand_crank: 8, creative_motor: 16384, water_wheel: 32, large_water_wheel: 128};
+    if (line v.hasKey(t)) {
+        return line v[t] as num;
+    }
+    return 0;
+}
+
+/** True for blocks that make rotation. */
+function isSource(t: str): num {
+    return blockCapacity(t) > 0;
+}
+
+/** "small" for small cogwheels (cogwheel, millstone), "large", or "". */
+function cogKind(t: str): str {
+    if (t == "cogwheel" || t == "millstone") {
+        return "small";
+    } else if (t == "large_cogwheel") {
+        return "large";
+    }
+    return "";
+}
+
+/** The faces of block `key` that have a shaft end (hasShaftTowards). */
+function shaftFaces(key: str): list[str] {
+    line t = global kType[key] as str;
+    line a = global kAxis[key] as str;
+    line f = global kFace[key] as str;
+    if (line t == "gearbox") {
+        line out: list[str] = [];
+        for (line d of allDirs()) {
+            if (dirAxis(line d as str) != line a) {
+                line out.append(line d);
+            }
+        }
+        return line out;
+    } else if (line t == "hand_crank" || line t == "encased_fan" || line t == "mechanical_drill") {
+        return [dirOpp(line f)];
+    } else if (line t == "creative_motor") {
+        return [line f];
+    } else if (line t == "millstone") {
+        return ["down"];
+    } else if (line t == "depot") {
+        return [];
+    } else if (line t == "clutch" && global kPowered[key] == 1) {
+        return [];
+    }
+    return [axisDir(line a, 1), axisDir(line a, -1)];
+}
+
+/** How the speed seen at face d of block `key` relates to the block's own
+ * speed (Create's getAxisModifier, written per face): a gearbox reverses
+ * through-rotation and turns corners, a powered gearshift reverses one side. */
+function faceMul(key: str, d: str): num {
+    line t = global kType[key] as str;
+    if (line t == "gearbox") {
+        line ax = crossAxes(global kAxis[key] as str);
+        if (dirAxis(d) == line ax[1]) {
+            return dirSign(d);
+        }
+        return 0 - dirSign(d);
+    } else if (line t == "gearshift" && global kPowered[key] == 1) {
+        if (dirSign(d) < 0) {
+            return -1;
+        }
+    }
+    return 1;
+}
+
+/** The orientation matrix of a block's main model. */
+function blockOrient(key: str): list[vec] {
+    line t = global kType[key] as str;
+    line k = blockOrientKind(line t);
+    if (line k == "facing") {
+        return upTo(global kFace[key] as str);
+    } else if (line k == "haxis") {
+        return xTo(global kAxis[key] as str);
+    } else if (line k == "none") {
+        return upTo("up");
+    }
+    return alongAxis(global kAxis[key] as str);
+}
+
+/** Collision boxes in model px (about the center 8,8,8, before turning). */
+function shapePx(t: str): list {
+    if (t == "shaft") {
+        return [[5, 0, 5, 11, 16, 11]];
+    } else if (t == "cogwheel") {
+        return [[2, 6, 2, 14, 10, 14], [5, 0, 5, 11, 16, 11]];
+    } else if (t == "large_cogwheel") {
+        return [[0, 6, 0, 16, 10, 16], [5, 0, 5, 11, 16, 11]];
+    } else if (t == "hand_crank") {
+        return [[5, 0, 5, 11, 6, 11], [1, 3, 1, 15, 8, 15]];
+    } else if (t == "creative_motor") {
+        return [[3, 0, 3, 13, 14, 13]];
+    } else if (t == "mechanical_press") {
+        return [[0, 0, 0, 16, 16, 4], [0, 0, 12, 16, 16, 16], [0, 0, 4, 4, 16, 12], [12, 0, 4, 16, 16, 12]];
+    } else if (t == "millstone") {
+        return [[0, 0, 0, 16, 6, 16], [2, 6, 2, 14, 16, 14]];
+    } else if (t == "depot") {
+        return [[0, 0, 0, 16, 13, 16]];
+    } else if (t == "speedometer" || t == "stressometer") {
+        return [[2, 0, 2, 14, 16, 14]];
+    } else if (t == "large_water_wheel") {
+        return [[-16, 0, -16, 32, 16, 32]];
+    }
+    return [[0, 0, 0, 16, 16, 16]];
+}
+
+/** Collision boxes of block `key`: [lo, hi] pairs in blocks, relative to its
+ * lowest corner (they can reach past it: the large water wheel). */
+function blockShapes(key: str): list {
+    line m = blockOrient(key);
+    line out = [];
+    for (line b of shapePx(global kType[key] as str)) {
+        line out.append(turnBox(line m, line b as list[num]));
+    }
+    return line out;
+}
+
+/** The other block cells a block fills (the large water wheel's ring). */
+function extraCells(key: str): list[str] {
+    if (global kType[key] != "large_water_wheel") {
+        return [];
+    }
+    line ax = crossAxes(global kAxis[key] as str);
+    line p = keyVec(key);
+    line out: list[str] = [];
+    repeat (line i to 3) {
+        repeat (line j to 3) {
+            if (line i != 2 || line j != 2) {
+                line q = line p;
+                if (line ax[1] == "x") {
+                    line q.x = line p.x + line i - 2;
+                } else {
+                    line q.y = line p.y + line i - 2;
+                }
+                if (line ax[2] == "y") {
+                    line q.y = line p.y + line j - 2;
+                } else {
+                    line q.z = line p.z + line j - 2;
+                }
+                line out.append(keyAt(line q.x, line q.y, line q.z));
+            }
+        }
+    }
+    return line out;
+}
+
+/** The display parts of block `key`. Each is [model, spin axis ("" for a
+ * still part), speed factor, large-cog flag, orientation, offset from the
+ * block center (blocks), role]. A spinning part turns at the block's speed
+ * times its factor; roles name the parts the plot moves (press head,
+ * needles). */
+function blockParts(key: str): list {
+    line t = global kType[key] as str;
+    line a = global kAxis[key] as str;
+    line f = global kFace[key] as str;
+    line m = blockOrient(key);
+    line z = vec(0, 0, 0);
+    if (line t == "shaft") {
+        return [["shaft", line a, 1, 0, line m, line z, ""]];
+    } else if (line t == "cogwheel") {
+        return [["cogwheel", line a, 1, 0, line m, line z, ""]];
+    } else if (line t == "large_cogwheel") {
+        return [["large_cogwheel", line a, 1, 1, line m, line z, ""], ["shaft", line a, 1, 0, line m, line z, ""]];
+    } else if (line t == "gearbox" || line t == "clutch" || line t == "gearshift") {
+        line out = [[line t, "", 0, 0, line m, line z, ""]];
+        for (line d of shaftFaces(key)) {
+            line out.append(["half_shaft", dirAxis(line d as str), faceMul(key, line d as str), 0, upTo(dirOpp(line d as str)), line z, "half"]);
+        }
+        if (line t == "clutch") {
+            // a clutch keeps its half shafts while it is engaged or not
+            line out = [[line t, "", 0, 0, line m, line z, ""], ["half_shaft", line a, 1, 0, upTo(axisDir(line a, -1)), line z, "half"], ["half_shaft", line a, 1, 0, upTo(axisDir(line a, 1)), line z, "half"]];
+        }
+        return line out;
+    } else if (line t == "hand_crank") {
+        return [["hand_crank", line a, 1, 0, line m, line z, ""]];
+    } else if (line t == "creative_motor") {
+        return [["creative_motor", "", 0, 0, line m, line z, ""], ["half_shaft", line a, 1, 0, upTo(dirOpp(line f)), line z, ""]];
+    } else if (line t == "water_wheel" || line t == "large_water_wheel") {
+        return [[line t, line a, 1, 0, line m, line z, ""], ["shaft", line a, 1, 0, line m, line z, ""]];
+    } else if (line t == "mechanical_press") {
+        return [["press", "", 0, 0, line m, line z, ""], ["shaft", line a, 1, 0, alongAxis(line a), line z, ""], ["press_head", "", 0, 0, line m, line z, "head"]];
+    } else if (line t == "millstone") {
+        return [["millstone_base", "", 0, 0, line m, line z, ""], ["millstone", "y", 1, 0, line m, line z, ""]];
+    } else if (line t == "encased_fan") {
+        return [["encased_fan", "", 0, 0, line m, line z, ""], ["fan_propeller", line a, 1, 0, line m, line z, ""], ["half_shaft", line a, 1, 0, upTo(line f), line z, ""]];
+    } else if (line t == "mechanical_drill") {
+        return [["drill", "", 0, 0, line m, line z, ""], ["drill_head", line a, 1, 0, line m, line z, ""], ["half_shaft", line a, 1, 0, upTo(line f), line z, ""]];
+    } else if (line t == "depot") {
+        return [["depot", "", 0, 0, line m, line z, ""]];
+    } else if (line t == "speedometer" || line t == "stressometer") {
+        line out = [[line t, "", 0, 0, line m, line z, ""], ["shaft", line a, 1, 0, line m, line z, ""]];
+        for (line d of allDirs()) {
+            if (dirAxis(line d as str) != line a) {
+                line out.append(["gauge_needle", "", 0, 0, northTo(line d as str), line z, "needle " + (line d as str)]);
+            }
+        }
+        return line out;
+    }
+    return [];
+}
+
+/** The block a type's kit item looks like / the particles it breaks into. */
+function blockMaterial(t: str): str {
+    if (t == "cogwheel" || t == "large_cogwheel" || t == "water_wheel" || t == "large_water_wheel" || t == "hand_crank") {
+        return "spruce_planks";
+    } else if (t == "clutch" || t == "gearshift" || t == "speedometer" || t == "stressometer") {
+        return "gold_block";
+    } else if (t == "millstone") {
+        return "granite";
+    } else if (t == "creative_motor") {
+        return "purpur_block";
+    }
+    return "andesite";
+}

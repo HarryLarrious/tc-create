@@ -1,0 +1,84 @@
+{
+ "textures": {
+  "side": "create:block/shaft",
+  "end": "create:block/shaft_end",
+  "particle": "create:block/shaft"
+ },
+ "elements": [
+  {
+   "from": [
+    5,
+    0,
+    5
+   ],
+   "to": [
+    11,
+    8,
+    11
+   ],
+   "faces": {
+    "north": {
+     "uv": [
+      5,
+      8,
+      11,
+      16
+     ],
+     "texture": "#side",
+     "tintindex": 0
+    },
+    "south": {
+     "uv": [
+      5,
+      8,
+      11,
+      16
+     ],
+     "texture": "#side",
+     "tintindex": 0
+    },
+    "east": {
+     "uv": [
+      5,
+      8,
+      11,
+      16
+     ],
+     "texture": "#side",
+     "tintindex": 0
+    },
+    "west": {
+     "uv": [
+      5,
+      8,
+      11,
+      16
+     ],
+     "texture": "#side",
+     "tintindex": 0
+    },
+    "up": {
+     "uv": [
+      5,
+      5,
+      11,
+      11
+     ],
+     "texture": "#end",
+     "tintindex": 0
+    },
+    "down": {
+     "uv": [
+      5,
+      5,
+      11,
+      11
+     ],
+     "texture": "#end",
+     "tintindex": 0
+    }
+   }
+  }
+ ],
+ "ambientocclusion": false
+}

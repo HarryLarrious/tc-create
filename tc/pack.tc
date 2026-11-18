@@ -1,0 +1,18 @@
+// The resource pack: every player gets it on join, and @pack sends it again.
+
+/** The published pack (tools/build_pack.py rewrites this URL on every build). */
+function packUrl(): str {
+    return "https://raw.githubusercontent.com/HarryLarrious/tc-create/pack-dist/create-pack-8ffd088366f8.zip";
+}
+
+function packSend {
+    default.sendResourcePack(packUrl());
+}
+
+playerevent resourcePackLoad {
+    default.sendMessage(s"<green>Pack loaded.</green>");
+}
+
+playerevent resourcePackDecline {
+    default.sendMessage(s"<red>Resource pack declined.</red> <gray>Create's blocks are drawn by it. Allow server resource packs and type <yellow>@pack</yellow>.");
+}

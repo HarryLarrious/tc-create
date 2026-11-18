@@ -1,0 +1,94 @@
+// Items: the kit's block items, Create's tools and its crafting items.
+//
+// A block item carries the item tag "create_block" (its type); a tool
+// "create_tool" (wrench, goggles); a Create material "create_item" (its name,
+// as in "create:iron_sheet"). All are stone with an item model from the pack.
+
+function kitItem(t: str): item {
+    line it = item("stone").setModel("create:" + t);
+    line it = line it.setName(s"<!i><white>%var(blockName(t))");
+    return line it.setTag("create_block", t);
+}
+
+function toolItem(name: str): item {
+    line names = {wrench: "Wrench", goggles: "Engineer's Goggles"};
+    line it = item("stone").setModel("create:" + name);
+    line it = line it.setName(s"<!i><gold>%var(line names[name] as str)");
+    return line it.setTag("create_tool", name);
+}
+
+/** A Create material item (name without "create:"). */
+function createItem(name: str, count: num = 1): item {
+    line names = {iron_sheet: "Iron Sheet", golden_sheet: "Golden Sheet", copper_sheet: "Copper Sheet", brass_sheet: "Brass Sheet", wheat_flour: "Wheat Flour", cinder_flour: "Cinder Flour", dough: "Dough", andesite_alloy: "Andesite Alloy", crushed_raw_iron: "Crushed Raw Iron", crushed_raw_gold: "Crushed Raw Gold", crushed_raw_copper: "Crushed Raw Copper", zinc_nugget: "Zinc Nugget"};
+    line label = name;
+    if (line names.hasKey(name)) {
+        line label = line names[name] as str;
+    }
+    line it = item("paper", count).setModel("create:" + name);
+    line it = line it.setName(s"<!i><white>%var(line label)");
+    return line it.setTag("create_item", name);
+}
+
+/** An item's id: "create:<name>" for Create materials, else the vanilla
+ * "minecraft:<id>". */
+function itemId(it: item): str {
+    line c = it.getTag("create_item");
+    if (line c != "" && line c != 0) {
+        return "create:" + (line c as str);
+    }
+    return "minecraft:" + itemMat(it);
+}
+
+/** The item with id `id` ("create:x" or "minecraft:x"). */
+function makeItem(id: str, count: num = 1): item {
+    line p = id.split(":");
+    if (line p[1] == "create") {
+        return createItem(line p[2] as str, count);
+    }
+    return item(line p[2] as str, count);
+}
+
+/** A recipe's results rolled once: "count id chance; ..." -> items. */
+function rollResults(spec: str, times: num = 1): list[item] {
+    line out: list[item] = [];
+    for (line part of spec.split("; ")) {
+        line w = (line part as str).split(" ");
+        line n = 0;
+        repeat (times) {
+            if (num.randomd(0, 1) < num.parse(line w[3] as str)) {
+                line n += num.parse(line w[1] as str);
+            }
+        }
+        if (line n > 0) {
+            line out.append(makeItem(line w[2] as str, line n));
+        }
+    }
+    return line out;
+}
+
+/** Everything a player gets from @kit. */
+function giveKit {
+    for (line t of blockTypes()) {
+        default.giveItems(kitItem(line t as str), 16);
+    }
+    default.giveItems(toolItem("wrench"));
+    default.giveItems(toolItem("goggles"));
+}
+
+/** An item's vanilla material id in lowercase ("iron_ingot"). */
+function itemMat(it: item): str {
+    return it.getMaterial().setCase(case="lowercase");
+}
+
+/** An item's text tag `name`, or "". */
+function tagOf(it: item, name: str): str {
+    line v = "%var(it.getTag(name))";
+    if (line v == "0") {
+        return "";
+    }
+    return line v;
+}
+
+function toolOf(it: item): str {
+    return tagOf(it, "create_tool");
+}

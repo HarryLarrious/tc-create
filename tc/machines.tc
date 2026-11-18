@@ -1,0 +1,636 @@
+// Sources and machines: hand crank, creative motor, water wheels, clutch and
+// gearshift, mechanical press, millstone, encased fan, mechanical drill,
+// depot. Timings follow Create (PressingBehaviour, MillstoneBlockEntity,
+// AirCurrent, WaterWheelBlockEntity, HandCrankBlockEntity).
+
+/** The item display showing a depot's item. */
+declare global kItemDisp: dict[str];
+
+/** Motor speeds a right click steps through (Create's scroll value). */
+function motorSteps(): list[num] {
+    return [1, 2, 4, 8, 16, 32, 64, 128, 256];
+}
+
+function machinePlaced(key: str) {
+    line t = global kType[key] as str;
+    if (line t == "creative_motor") {
+        if (global kCfg[key] == 0) {
+            global kCfg[key] = 16;
+        }
+        global kGen[key] = (global kCfg[key] as num) * dirSign(global kFace[key] as str);
+    } else if (line t == "water_wheel" || line t == "large_water_wheel") {
+        waterWheelFlow(key);
+    } else if (line t == "clutch" || line t == "gearshift") {
+        redstoneCheck(key);
+    }
+    if (line t == "depot" || line t == "millstone") {
+        global kItems[key] = [];
+    }
+}
+
+function machineRemoved(key: str) {
+    line c = keyVec(key) + vec(0.5, 0.9, 0.5);
+    for (line it of itemsAt(key)) {
+        game.spawnItem(line it as item, loc(line c.x, line c.y, line c.z));
+    }
+    global kItems.remove(key);
+    depotDraw(key, "");
+}
+
+/** Called when a block's speed changes. */
+function machineSpeedChanged(key: str) {
+    line t = global kType[key] as str;
+    if (line t == "mechanical_press" && global kSpeed[key] == 0 && global kTimer[key] > 0) {
+        // stopped mid-stroke: the head goes back up
+        global kTimer[key] = 0;
+        movePart(key, "head", vec(0, 0, 0), 10);
+    }
+}
+
+// ---------------------------------------------------------------- the tick
+
+/** Runs every tick from the main loop. */
+function machinesTick(tick: num) {
+    for (line k of global kTicking.getKeys()) {
+        line key = line k as str;
+        line t = global kType[line key] as str;
+        line s = global kSpeed[line key] as num;
+        if (line t == "hand_crank") {
+            crankTick(line key);
+        } else if (line t == "mechanical_press") {
+            if (line s != 0) {
+                pressTick(line key, tick);
+            }
+        } else if (line t == "millstone") {
+            millTick(line key, tick);
+        } else if (line t == "encased_fan") {
+            if (line s != 0 && tick % 2 == 0) {
+                fanTick(line key);
+            }
+        } else if (line t == "mechanical_drill") {
+            if (line s != 0) {
+                drillTick(line key);
+            }
+        } else if (line t == "water_wheel" || line t == "large_water_wheel") {
+            if (tick % 20 == 0) {
+                waterWheelFlow(line key);
+            }
+        } else if (line t == "clutch" || line t == "gearshift") {
+            if (tick % 4 == 0) {
+                redstoneCheck(line key);
+            }
+        }
+    }
+}
+
+// ---------------------------------------------------------------- crank and motor
+
+/** A player turns hand crank `key` (Create: 32 RPM for 10 ticks per use;
+ * sneaking turns it backwards). */
+function crankUse(key: str, back: num) {
+    line dir = 1;
+    if (back == 1) {
+        line dir = -1;
+    }
+    line g = 32 * line dir * dirSign(global kFace[key] as str);
+    global kTimer[key] = 10;
+    if (global kGen[key] != line g) {
+        global kGen[key] = line g;
+        markDirty(key);
+    }
+    line c = keyVec(key) + vec(0.5, 0.5, 0.5);
+    allPlayers.playSound(snd("Wood Hit", 0.4, 1.4), loc(line c.x, line c.y, line c.z));
+}
+
+function crankTick(key: str) {
+    if (global kTimer[key] > 0) {
+        global kTimer[key] -= 1;
+        if (global kTimer[key] == 0) {
+            global kGen[key] = 0;
+            markDirty(key);
+        }
+    }
+}
+
+/** Steps a creative motor's speed up (or down) the list; returns the new speed. */
+function motorStep(key: str, down: num): num {
+    line steps = motorSteps();
+    line cur = global kCfg[key] as num;
+    line mag = num.abs(line cur);
+    line i = line steps.find(line mag);
+    if (line i == 0) {
+        line i = 5;
+    }
+    if (down == 1) {
+        line i -= 1;
+    } else {
+        line i += 1;
+    }
+    line sign = 1;
+    if (line cur < 0) {
+        line sign = -1;
+    }
+    if (line i > line steps.len()) {
+        // past 256: reverse, starting slow
+        line i = 1;
+        line sign = 0 - line sign;
+    } else if (line i < 1) {
+        line i = 1;
+        line sign = 0 - line sign;
+    }
+    line v = (line steps[line i] as num) * line sign;
+    global kCfg[key] = line v;
+    saved kSave[key] = "%var(global kType[key]) %var(global kAxis[key]) %var(global kFace[key]) %var(line v)";
+    global kGen[key] = line v * dirSign(global kFace[key] as str);
+    markDirty(key);
+    return line v;
+}
+
+// ---------------------------------------------------------------- water wheels
+
+/** The water's flow at a block (Minecraft's FluidState.getFlow, roughly):
+ * falling water flows down; otherwise toward lower or open neighbours. */
+function waterFlow(p: vec): vec {
+    line at = loc(p.x + 0.5, p.y + 0.5, p.z + 0.5);
+    if (game.getBlockMaterial(line at) != "water") {
+        return vec(0, 0, 0);
+    }
+    line lv = num.parse(game.getBlockData(line at, "level"));
+    if (line lv >= 8) {
+        return vec(0, -1, 0);
+    }
+    line h = 8 - line lv;
+    line flow = vec(0, 0, 0);
+    for (line d of ["north", "south", "east", "west"]) {
+        line q = p + dirVec(line d as str);
+        line qa = loc(line q.x + 0.5, line q.y + 0.5, line q.z + 0.5);
+        line m = game.getBlockMaterial(line qa);
+        if (line m == "water") {
+            line ql = num.parse(game.getBlockData(line qa, "level"));
+            line qh = 8 - line ql;
+            if (line ql >= 8) {
+                line qh = 8;
+            }
+            line flow += dirVec(line d as str) * (line h - line qh);
+        } else if (line m == "air") {
+            line flow += dirVec(line d as str) * line h;
+        }
+    }
+    return line flow;
+}
+
+/** Create's WaterWheelBlockEntity.determineAndApplyFlowScore: each water
+ * block round the wheel adds +-1 when it flows along the wheel's turning
+ * direction there; the wheel turns 8 RPM (4 for the large one) that way. */
+function waterWheelFlow(key: str) {
+    line a = global kAxis[key] as str;
+    line ax = crossAxes(line a);
+    line p = keyVec(key);
+    line large = global kType[key] == "large_water_wheel";
+    line offs: list[vec] = [];
+    for (line u of line ax) {
+        for (line sg of [-1, 1]) {
+            line dv = axisUnit(line u as str) * (line sg as num);
+            if (line large) {
+                line c = line dv * 2;
+                line offs.append(line c);
+                for (line u2 of line ax) {
+                    if (line u2 != line u) {
+                        line offs.append(line c + axisUnit(line u2 as str));
+                        line offs.append(line c - axisUnit(line u2 as str));
+                    }
+                }
+            } else {
+                line offs.append(line dv);
+            }
+        }
+    }
+    line score = 0;
+    line A = axisUnit(line a);
+    for (line o of line offs) {
+        line off = line o as vec;
+        line f = waterFlow(line p + line off);
+        // keep the flow in the wheel's plane
+        line f = line f - line A * comp(line f, line a);
+        if (line f.len() > 0.001) {
+            line f = line f.setLength(1);
+            line n = line off.setLength(1);
+            // the wheel's +rotation direction at that point: n turned 90 degrees about +axis
+            line motion = line A.cross(line n);
+            line dot = line f.dot(line motion);
+            if (line dot > 0.5) {
+                line score += 1;
+            } else if (line dot < -0.5) {
+                line score -= 1;
+            }
+        }
+    }
+    line size = 1;
+    if (line large) {
+        line size = 2;
+    }
+    line g = num.clamp(line score, -1, 1) * 8 / line size;
+    if (global kGen[key] != line g) {
+        global kGen[key] = line g;
+        markDirty(key);
+    }
+}
+
+// ---------------------------------------------------------------- redstone
+
+/** Clutch and gearshift: powered when a block next to them is powered. */
+function redstoneCheck(key: str) {
+    line p = keyVec(key);
+    line lit = 0;
+    for (line d of allDirs()) {
+        line q = line p + dirVec(line d as str);
+        line at = loc(line q.x + 0.5, line q.y + 0.5, line q.z + 0.5);
+        if (game.blockIsPowered(line at, mode="Indirect power") || game.getBlockMaterial(line at) == "redstone_block") {
+            line lit = 1;
+        }
+    }
+    if (global kPowered[key] == line lit) {
+        return;
+    }
+    global kPowered[key] = line lit;
+    // the half shafts' directions change: redraw and solve both sides
+    eraseBlock(key);
+    drawBlock(key);
+    markDirty(key);
+    for (line d of [axisDir(global kAxis[key] as str, 1), axisDir(global kAxis[key] as str, -1)]) {
+        line n = keyStep(key, line d as str);
+        if (global kType.hasKey(line n)) {
+            markDirty(line n);
+        }
+    }
+}
+
+// ---------------------------------------------------------------- depot
+
+/** The item on a depot, or nothing. */
+function depotItem(key: str): list {
+    return itemsAt(key);
+}
+
+/** Shows `id`'s item lying on depot `key` ("" clears it). */
+function depotDraw(key: str, dummy: str) {
+    if (global kItemDisp.hasKey(key)) {
+        select entitiesByName(global kItemDisp[key]);
+        selectedEntity.remove();
+        select reset;
+        global kItemDisp.remove(key);
+    }
+    line items = itemsAt(key);
+    if (line items.len() == 0 || global kType[key] != "depot") {
+        return;
+    }
+    line c = keyVec(key) + vec(0.5, 13.3 / 16, 0.5);
+    game.spawnItemDisplay(loc(line c.x, line c.y, line c.z), line items[1] as item);
+    lastEntity.setItemDisplayModelType(type="Fixed");
+    lastEntity.setDisplayTransformationMatrix(displayMatrix(upTo("north"), vec(0, 0, 0), 0.5));
+    lastEntity.setTag("tccreate", key);
+    global kItemDisp[key] = lastEntity.uuid;
+}
+
+function depotSet(key: str, items: list) {
+    global kItems[key] = items;
+    depotDraw(key, "");
+}
+
+// ---------------------------------------------------------------- press
+
+/** Create's PressingBehaviour: a 240-step cycle run at
+ * lerp(|speed| / 512, 1, 60) steps a tick; the head comes down by step 120
+ * (eased in), presses, waits to 160, and goes back up by 240. */
+function pressTick(key: str, tick: num) {
+    line rate = num.floor(1 + (num.min(num.abs(global kSpeed[key] as num), 512) / 512) * 59);
+    line t = global kTimer[key] as num;
+    if (line t == 0) {
+        if (tick % 10 != 0) {
+            return;
+        }
+        line depth = pressTarget(key);
+        if (line depth == 0) {
+            return;
+        }
+        global kTimer[key] = 1;
+        movePart(key, "head", vec(0, line depth, 0), num.max(1, num.ceil(120 / line rate)));
+        return;
+    }
+    line t2 = line t + line rate;
+    if (line t < 120 && line t2 >= 120) {
+        pressApply(key);
+    }
+    if (line t < 160 && line t2 >= 160) {
+        movePart(key, "head", vec(0, 0, 0), num.max(1, num.ceil(80 / line rate)));
+    }
+    if (line t2 >= 240) {
+        line t2 = 0;
+    }
+    global kTimer[key] = line t2;
+}
+
+/** How far the head goes down for what is under the press (blocks, negative),
+ * or 0 if there is nothing to press. */
+function pressTarget(key: str): num {
+    line below = keyStep(key, "down");
+    if (typeAt(line below) == "depot") {
+        line items = depotItem(line below);
+        if (line items.len() > 0) {
+            if (pressRecipes().hasKey(itemId(line items[1] as item))) {
+                return -0.1875;
+            }
+        }
+        return 0;
+    }
+    if (pressFindItem(key) != "") {
+        return -0.875;
+    }
+    return 0;
+}
+
+/** An item entity lying in the cell under the press that can be pressed. */
+function pressFindItem(key: str): str {
+    line c = keyVec(key) + vec(0.5, -0.5, 0.5);
+    select entitiesByCondition (entity.isItem() && entity.isNearLocation(loc(line c.x, line c.y, line c.z), 0.55, shape="Cube"));
+    line found = "";
+    for (line id of game.selectionTargetUUIDs) {
+        select entitiesByName(line id);
+        if (pressRecipes().hasKey(itemId(selectedEntity.entityItem))) {
+            line found = line id as str;
+        }
+    }
+    select reset;
+    return line found;
+}
+
+/** The press hits: one item under it becomes its pressing result. */
+function pressApply(key: str) {
+    line c = keyVec(key) + vec(0.5, -0.5, 0.5);
+    line at = loc(line c.x, line c.y, line c.z);
+    allPlayers.playSound(snd("Anvil Land", 0.5, 0.75 + num.abs(global kSpeed[key] as num) / 1024), line at);
+    line below = keyStep(key, "down");
+    if (typeAt(line below) == "depot") {
+        line items = depotItem(line below);
+        if (line items.len() == 0) {
+            return;
+        }
+        line it = line items[1] as item;
+        line r = dStr(pressRecipes(), itemId(line it));
+        if (line r == "") {
+            return;
+        }
+        // the whole stack on a depot is pressed one item at a time, the
+        // results stay on the depot (they stack when they are the same)
+        line out = rollResults(line r as str);
+        line n = line it.getStackSize();
+        allPlayers.displayParticleEffect(par("Item", amount=8, spreadHoriz=0.2, spreadVert=0.05, material=itemMat(line it)), loc(line c.x, line c.y + 0.85, line c.z));
+        if (line n <= 1 && line out.len() > 0) {
+            depotSet(line below, [line out[1]]);
+        } else {
+            depotSet(line below, [line it.setStackSize(line n - 1)]);
+            for (line o of line out) {
+                game.spawnItem(line o as item, loc(line c.x, line c.y + 0.9, line c.z), applyMotion="False");
+            }
+        }
+        return;
+    }
+    line id = pressFindItem(key);
+    if (line id == "") {
+        return;
+    }
+    select entitiesByName(line id);
+    line it = selectedEntity.entityItem;
+    line n = line it.getStackSize();
+    line r = pressRecipes()[itemId(line it)] as str;
+    if (line n <= 1) {
+        selectedEntity.remove();
+    } else {
+        selectedEntity.setItem(line it.setStackSize(line n - 1));
+    }
+    select reset;
+    allPlayers.displayParticleEffect(par("Item", amount=8, spreadHoriz=0.2, spreadVert=0.05, material=itemMat(line it)), line at);
+    for (line o of rollResults(line r)) {
+        game.spawnItem(line o as item, line at, applyMotion="False");
+    }
+}
+
+// ---------------------------------------------------------------- millstone
+
+/** Create's MillstoneBlockEntity: the timer starts at the recipe's time and
+ * goes down by clamp(|speed| / 16, 1, 512) a tick. Items thrown on top go in. */
+function millTick(key: str, tick: num) {
+    line items = itemsAt(key);
+    if (tick % 10 == 0) {
+        millTakeThrown(key);
+        line items = itemsAt(key);
+    }
+    line s = num.abs(global kSpeed[key] as num);
+    if (line s == 0 || line items.len() == 0) {
+        return;
+    }
+    line input = line items[1] as item;
+    line id = itemId(line input);
+    if (!millRecipes().hasKey(line id)) {
+        return;
+    }
+    if (global kTimer[key] <= 0) {
+        global kTimer[key] = dNum(millTimes(), line id, 100);
+    }
+    global kTimer[key] -= num.clamp(num.floor(line s / 16), 1, 512);
+    line c = keyVec(key) + vec(0.5, 1.0, 0.5);
+    if (tick % 4 == 0) {
+        allPlayers.displayParticleEffect(par("Item", amount=2, spreadHoriz=0.25, spreadVert=0.02, material=itemMat(line input)), loc(line c.x, line c.y, line c.z));
+    }
+    if (global kTimer[key] > 0) {
+        return;
+    }
+    // one input item done: its results come out of the side
+    line out = rollResults(millRecipes()[line id] as str);
+    line n = line input.getStackSize();
+    if (line n <= 1) {
+        global kItems[key] = [];
+    } else {
+        global kItems[key] = [line input.setStackSize(line n - 1)];
+    }
+    line side = keyVec(key) + vec(0.5, 0.3, 0.5);
+    for (line o of line out) {
+        game.spawnItem(line o as item, loc(line side.x, line side.y, line side.z));
+    }
+    allPlayers.playSound(snd("Grindstone Use", 0.5, 1.2), loc(line c.x, line c.y, line c.z));
+}
+
+/** Item entities resting on a millstone's top go in (one stack at a time). */
+function millTakeThrown(key: str) {
+    if (itemsAt(key).len() > 0) {
+        return;
+    }
+    line c = keyVec(key) + vec(0.5, 1.05, 0.5);
+    select entitiesByCondition (entity.isItem() && entity.isNearLocation(loc(line c.x, line c.y, line c.z), 0.45, shape="Cube"));
+    for (line id of game.selectionTargetUUIDs) {
+        select entitiesByName(line id);
+        line it = selectedEntity.entityItem;
+        if (millRecipes().hasKey(itemId(line it)) && itemsAt(key).len() == 0) {
+            global kItems[key] = [line it];
+            selectedEntity.remove();
+        }
+    }
+    select reset;
+}
+
+// ---------------------------------------------------------------- encased fan
+
+/** Create's AirCurrent: the air goes out of the fan's face when its speed
+ * (signed toward the facing) is positive, else in; it reaches
+ * lerp(|speed| / 256, 3, 20) blocks or to the first solid block. Water, lava,
+ * fire and soul fire in its path wash, blast, smoke or haunt items past them;
+ * entities in it are pushed along. */
+function fanTick(key: str) {
+    line f = global kFace[key] as str;
+    line s = global kSpeed[key] as num;
+    line flow = f;
+    if (s * dirSign(f) < 0) {
+        line flow = dirOpp(f);
+    }
+    line reach = 3 + num.min(num.abs(s) / 256, 1) * 17;
+    line F = dirVec(f);
+    line p = keyVec(key);
+    // walk the current: where it ends, and where each catalyst is
+    line len = 0;
+    line kinds: list[str] = [];
+    line kind = "";
+    repeat (line i to num.ceil(line reach)) {
+        line q = line p + line F * line i;
+        line at = loc(line q.x + 0.5, line q.y + 0.5, line q.z + 0.5);
+        line m = game.getBlockMaterial(line at);
+        if (line m == "water") {
+            line kind = "wash";
+        } else if (line m == "lava") {
+            line kind = "blast";
+        } else if (line m == "fire" || line m == "campfire") {
+            line kind = "smoke";
+        } else if (line m == "soul_fire" || line m == "soul_campfire") {
+            line kind = "haunt";
+        } else if (game.getBlockMaterial(line at, returnValue="Item").isSolid() || global kOwner.hasKey(keyAt(line q.x, line q.y, line q.z))) {
+            break;
+        }
+        line kinds.append(line kind);
+        line len = line i;
+    }
+    if (line len == 0) {
+        return;
+    }
+    line face = line p + vec(0.5, 0.5, 0.5) + line F * 0.5;
+    line mid = line face + line F * (line len * 0.5);
+    line push = dirVec(line flow) * (0.03 + num.min(num.abs(s) / 256, 1) * 0.07);
+    // air particles
+    line pp = line face + line F * num.randomd(0, line len);
+    allPlayers.displayParticleEffect(par("Cloud", amount=1, spreadHoriz=0.25, spreadVert=0.25, motion=dirVec(line flow) * 0.3, motionVariation=10), loc(line pp.x, line pp.y, line pp.z));
+    // entities in the current
+    select entitiesByCondition (entity.isNearLocation(loc(line mid.x, line mid.y, line mid.z), line len * 0.5 + 0.6, shape="Cube"));
+    for (line id of game.selectionTargetUUIDs) {
+        select entitiesByName(line id);
+        line el = selectedEntity.location;
+        line ev = vec(line el.x, line el.y + 0.2, line el.z) - line face;
+        line along = ev.dot(line F);
+        line across = ev - line F * line along;
+        if (line along >= -0.2 && line along <= line len && line across.len() < 0.8) {
+            if (!selectedEntity.hasTag("tccreate")) {
+                selectedEntity.setVelocity(push, addToCurrentVel="True");
+                line ci = num.clamp(num.ceil(line along), 1, line kinds.len());
+                line k = line kinds[line ci];
+                if (line k != "" && selectedEntity.isItem()) {
+                    fanProcess(line id as str, line k);
+                }
+            }
+        }
+    }
+    select reset;
+    for (line pl of game.plotPlayerUUIDs) {
+        proxyFanPush(line pl as str, line face, line F, line len, push);
+    }
+}
+
+/** An item entity in a fan's current past a catalyst: after 150 ticks in it
+ * (Create's fanProcessingTime) it turns into its result. */
+function fanProcess(id: str, kind: str) {
+    select entitiesByName(id);
+    line t = num.parse("%var(selectedEntity.getTag(\"fan\"))") + 2;
+    line it = selectedEntity.entityItem;
+    line r = fanResult(kind, itemId(line it));
+    if (line r == "") {
+        select reset;
+        return;
+    }
+    line el = selectedEntity.location;
+    if (line t < 150) {
+        selectedEntity.setTag("fan", line t);
+        if (line t % 10 == 0) {
+            if (kind == "wash") {
+                allPlayers.displayParticleEffect(par("Splash", amount=2, spreadHoriz=0.1, spreadVert=0.1), line el);
+            } else if (kind == "blast") {
+                allPlayers.displayParticleEffect(par("Flame", amount=2, spreadHoriz=0.1, spreadVert=0.1), line el);
+            } else if (kind == "smoke") {
+                allPlayers.displayParticleEffect(par("Smoke", amount=2, spreadHoriz=0.1, spreadVert=0.1), line el);
+            } else {
+                allPlayers.displayParticleEffect(par("Soul Flame", amount=2, spreadHoriz=0.1, spreadVert=0.1), line el);
+            }
+        }
+        select reset;
+        return;
+    }
+    line n = line it.getStackSize();
+    selectedEntity.remove();
+    select reset;
+    for (line o of rollResults(line r, line n)) {
+        game.spawnItem(line o as item, line el, applyMotion="False");
+    }
+}
+
+/** What a fan does to an item: Create's splashing and haunting recipes, and
+ * vanilla's smelting (blast) and smoking for common items. */
+function fanResult(kind: str, id: str): str {
+    if (kind == "wash") {
+        return dStr(washRecipes(), id);
+    } else if (kind == "haunt") {
+        return dStr(hauntRecipes(), id);
+    } else if (kind == "blast") {
+        line b: dict[str] = {"minecraft:raw_iron": "1 minecraft:iron_ingot 1", "minecraft:raw_gold": "1 minecraft:gold_ingot 1", "minecraft:raw_copper": "1 minecraft:copper_ingot 1", "create:crushed_raw_iron": "1 minecraft:iron_ingot 1", "create:crushed_raw_gold": "1 minecraft:gold_ingot 1", "create:crushed_raw_copper": "1 minecraft:copper_ingot 1", "minecraft:sand": "1 minecraft:glass 1", "minecraft:red_sand": "1 minecraft:glass 1", "minecraft:cobblestone": "1 minecraft:stone 1", "minecraft:stone": "1 minecraft:smooth_stone 1", "minecraft:clay_ball": "1 minecraft:brick 1", "minecraft:netherrack": "1 minecraft:nether_brick 1", "minecraft:cactus": "1 minecraft:green_dye 1", "minecraft:wet_sponge": "1 minecraft:sponge 1", "minecraft:iron_ore": "1 minecraft:iron_ingot 1", "minecraft:gold_ore": "1 minecraft:gold_ingot 1"};
+        return dStr(line b, id);
+    }
+    line m: dict[str] = {"minecraft:beef": "1 minecraft:cooked_beef 1", "minecraft:porkchop": "1 minecraft:cooked_porkchop 1", "minecraft:chicken": "1 minecraft:cooked_chicken 1", "minecraft:mutton": "1 minecraft:cooked_mutton 1", "minecraft:rabbit": "1 minecraft:cooked_rabbit 1", "minecraft:cod": "1 minecraft:cooked_cod 1", "minecraft:salmon": "1 minecraft:cooked_salmon 1", "minecraft:potato": "1 minecraft:baked_potato 1", "minecraft:kelp": "1 minecraft:dried_kelp 1", "create:dough": "1 minecraft:bread 1"};
+    return dStr(line m, id);
+}
+
+// ---------------------------------------------------------------- drill
+
+/** Create's BlockBreakingKineticBlockEntity, simplified: the drill works on
+ * the block in front of it, faster the faster it turns, and breaks it. */
+function drillTick(key: str) {
+    line p = keyVec(key) + dirVec(global kFace[key] as str);
+    line at = loc(line p.x + 0.5, line p.y + 0.5, line p.z + 0.5);
+    line m = game.getBlockMaterial(line at);
+    if (line m == "air" || line m == "water" || line m == "lava" || line m == "bedrock" || line m == "barrier" || global kOwner.hasKey(keyAt(line p.x, line p.y, line p.z))) {
+        global kTimer[key] = 0;
+        return;
+    }
+    line hard = 1.5;
+    line soft = ["dirt", "grass_block", "sand", "gravel", "clay", "snow_block", "soul_sand", "red_sand", "coarse_dirt", "farmland"];
+    if (line soft.find(line m) > 0) {
+        line hard = 0.6;
+    } else if (line m.contains("log") || line m.contains("planks") || line m.contains("wood")) {
+        line hard = 2;
+    } else if (line m.contains("ore") || line m.contains("deepslate")) {
+        line hard = 3;
+    } else if (line m == "obsidian" || line m == "crying_obsidian") {
+        line hard = 50;
+    }
+    global kTimer[key] += num.abs(global kSpeed[key] as num);
+    if (global kTimer[key] % 160 < num.abs(global kSpeed[key] as num)) {
+        allPlayers.displayParticleEffect(par("Block", amount=6, spreadHoriz=0.3, spreadVert=0.3, material=line m), line at);
+    }
+    if (global kTimer[key] >= line hard * 1000) {
+        global kTimer[key] = 0;
+        game.breakBlock(line at);
+    }
+}

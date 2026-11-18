@@ -1,0 +1,260 @@
+// Rotation: which blocks turn each other, at what ratio, and the stress
+// limit. Follows Create's RotationPropagator and KineticNetwork:
+//
+// - shafts join through faces that both have a shaft end; a gearbox or a
+//   powered gearshift changes the sign per face (faceMul);
+// - small cogwheels side by side on the same axis turn opposite ways (-1);
+// - a large cogwheel and a small one diagonal to it on the same axis: the
+//   small one turns twice as fast, the other way (-2, or -0.5 back);
+// - two large cogwheels at right angles, diagonal to each other in the plane
+//   of both axes: +-1 by which side each is on;
+// - every block's speed is the network's scale times its own ratio. Each
+//   source asks for a scale (its generated speed over its ratio); the largest
+//   wins (Create: the faster source overpowers). Sources asking for opposite
+//   directions, a loop whose ratios disagree, or any block over 256 RPM is a
+//   conflict: Create breaks the block that caused it, and so does this.
+// - stress: impact * |speed| summed against capacity * |generated speed|;
+//   above capacity the whole network stops (overstressed).
+//
+// Speeds are signed about the positive end of each block's axis.
+
+/** Block `key`'s neighbours that it turns: [[key, ratio], ...] where the
+ * neighbour's speed is this block's speed times ratio. */
+function kLinks(key: str): list {
+    line out = [];
+    // through shaft ends
+    for (line d of shaftFaces(key)) {
+        line n = keyStep(key, line d as str);
+        if (global kType.hasKey(line n)) {
+            if (shaftFaces(line n).find(dirOpp(line d as str)) > 0) {
+                line out.append([line n, faceMul(key, line d as str) * faceMul(line n, dirOpp(line d as str))]);
+            }
+        }
+    }
+    line ck = cogKind(global kType[key] as str);
+    if (line ck == "") {
+        return line out;
+    }
+    line a = global kAxis[key] as str;
+    line p = keyVec(key);
+    line ax = crossAxes(line a);
+    if (line ck == "small") {
+        for (line d of allDirs()) {
+            if (dirAxis(line d as str) != line a) {
+                line n = keyStep(key, line d as str);
+                if (cogOf(line n) == "small" && global kAxis[line n] == line a) {
+                    line out.append([line n, -1]);
+                }
+            }
+        }
+    }
+    // the four diagonals in the cog's own plane: small <-> large
+    for (line su of [-1, 1]) {
+        for (line sv of [-1, 1]) {
+            line n = keyOfVec(line p + axisUnit(line ax[1]) * (line su as num) + axisUnit(line ax[2]) * (line sv as num) + vec(0.5, 0.5, 0.5));
+            line nk = cogOf(line n);
+            if (axisAt(line n) == line a) {
+                if (line ck == "small" && line nk == "large") {
+                    line out.append([line n, -0.5]);
+                } else if (line ck == "large" && line nk == "small") {
+                    line out.append([line n, -2]);
+                }
+            }
+        }
+    }
+    if (line ck == "large") {
+        // large <-> large at right angles: diagonal in the plane of both axes
+        for (line b of line ax) {
+            for (line su of [-1, 1]) {
+                for (line sv of [-1, 1]) {
+                    line diff = axisUnit(line a) * (line su as num) + axisUnit(line b as str) * (line sv as num);
+                    line n = keyOfVec(line p + line diff + vec(0.5, 0.5, 0.5));
+                    if (cogOf(line n) == "large" && global kAxis[line n] == line b) {
+                        line r = 1;
+                        if ((line su as num > 0) != (line sv as num > 0)) {
+                            line r = -1;
+                        }
+                        line out.append([line n, line r]);
+                    }
+                }
+            }
+        }
+    }
+    return line out;
+}
+
+/** The cog kind of the block at `key`, or "" (also for no block). */
+function cogOf(key: str): str {
+    if (!global kType.hasKey(key)) {
+        return "";
+    }
+    return cogKind(global kType[key] as str);
+}
+
+function axisUnit(a: str): vec {
+    if (a == "x") {
+        return vec(1, 0, 0);
+    } else if (a == "y") {
+        return vec(0, 1, 0);
+    }
+    return vec(0, 0, 1);
+}
+
+/** Solves the network holding block `key`: sets every member's speed and
+ * redraws the ones that changed. Returns 1 if it found a conflict (and then
+ * leaves the speeds as they were). */
+function solveNetwork(key: str): num {
+    line fac = {};
+    fac[key] = 1;
+    line order: list[str] = [key];
+    line conflict = 0;
+    line i = 1;
+    while (line i <= line order.len()) {
+        line k = line order[line i];
+        line fk = line fac[line k] as num;
+        for (line pr of kLinks(line k)) {
+            line pl = line pr as list;
+            line n = line pl[1] as str;
+            line want = line fk * (line pl[2] as num);
+            if (line fac.hasKey(line n)) {
+                if (num.abs((line fac[line n] as num) - line want) > 0.001) {
+                    line conflict = 1;
+                }
+            } else {
+                line fac[line n] = line want;
+                line order.append(line n);
+            }
+        }
+        line i += 1;
+    }
+    // the scale: the strongest source's ask
+    line scale = 0;
+    line cap = 0;
+    for (line k of line order) {
+        line g = genAt(line k);
+        if (line g as num != 0) {
+            line ask = (line g as num) / (line fac[line k] as num);
+            if (line scale != 0 && (line ask > 0) != (line scale > 0)) {
+                line conflict = 1;
+            }
+            if (num.abs(line ask) > num.abs(line scale)) {
+                line scale = line ask;
+            }
+            line cap += blockCapacity(global kType[line k] as str) * num.abs(line g as num);
+        }
+    }
+    line stress = 0;
+    for (line k of line order) {
+        line s = line scale * (line fac[line k] as num);
+        if (num.abs(line s) > 256.001) {
+            line conflict = 1;
+        }
+        line stress += blockImpact(global kType[line k] as str) * num.abs(line s);
+    }
+    if (line conflict == 1) {
+        return 1;
+    }
+    global netNext += 1;
+    line net = global netNext;
+    global netCap["%var(net)"] = line cap;
+    global netStress["%var(net)"] = line stress;
+    global netSize["%var(net)"] = line order.len();
+    line over = line stress > line cap;
+    for (line k of line order) {
+        // forget the old network's numbers
+        line old = netOf(line k);
+        if (line old as num != line net) {
+            global netCap.remove("%var(old)");
+            global netStress.remove("%var(old)");
+            global netSize.remove("%var(old)");
+        }
+        global kNet[line k] = line net;
+        line theo = line scale * (line fac[line k] as num);
+        global kTheo[line k] = line theo;
+        line s = line theo;
+        if (line over) {
+            line s = 0;
+        }
+        if (speedAt(line k) != line s) {
+            global kSpeed[line k] = line s;
+            drawSpeed(line k);
+            machineSpeedChanged(line k);
+        } else if (global kType[line k] == "stressometer") {
+            drawNeedles(line k, 10);
+        }
+    }
+    return 0;
+}
+
+/** Marks block `key`'s network to be solved again at the end of this tick. */
+function markDirty(key: str) {
+    global kDirty[key] = 1;
+}
+
+/** Solves every network marked dirty. A conflict breaks the block that was
+ * marked (as Create breaks the block that caused it) and solves what is left. */
+function solveDirty {
+    line rounds = 0;
+    while (global kDirty.len() > 0 && line rounds < 8) {
+        line rounds += 1;
+        line keys = global kDirty.getKeys();
+        global kDirty = {};
+        line done = {};
+        for (line k of line keys) {
+            line key = line k as str;
+            if (global kType.hasKey(line key) && !line done.hasKey(line key)) {
+                if (solveNetwork(line key) == 1) {
+                    popBlock(line key, "<red>Conflicting rotation</red>");
+                } else {
+                    line n = netOf(line key);
+                    // every member of that network is done
+                    line done[line key] = 1;
+                    for (line m of netMembersNear(line key)) {
+                        line done[line m as str] = 1;
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Blocks next to `key` (its links): enough to skip solving the same
+ * network twice in one round for the common case of neighbours marked together. */
+function netMembersNear(key: str): list[str] {
+    line out: list[str] = [];
+    for (line pr of kLinks(key)) {
+        line out.append(((line pr as list)[1]) as str);
+    }
+    return line out;
+}
+
+/** What a player reads with goggles or a gauge: speed, and the network's
+ * stress against its capacity. */
+function kineticReport(key: str): str {
+    line t = global kType[key] as str;
+    line s = speedAt(key);
+    line theo = theoAt(key);
+    line cap = capOf(netOf(key));
+    line st = stressOf(netOf(key));
+    line spd = num.round(num.abs(line s as num) * 10) / 10;
+    line out = "<gold>" + blockName(line t) + "</gold>";
+    if (line cap as num > 0 && line st as num > line cap as num) {
+        line out = line out + "  <red><b>OVERSTRESSED</b></red>  <gray>" + "%var(num.round(line st as num)) / %var(num.round(line cap as num)) su";
+        return line out;
+    }
+    line kind = "<gray>Rotating at</gray> <aqua>%var(line spd) RPM</aqua>";
+    if (line s as num == 0 && line theo as num == 0) {
+        line kind = "<gray>Not rotating</gray>";
+    }
+    line out = line out + "  " + line kind;
+    if (blockImpact(line t) > 0) {
+        line out = line out + "  <gray>Impact</gray> <yellow>%var(num.round(blockImpact(line t) * num.abs(line s as num))) su</yellow>";
+    }
+    if (blockCapacity(line t) > 0) {
+        line out = line out + "  <gray>Capacity</gray> <green>%var(num.round(blockCapacity(line t) * num.abs((genAt(key)) as num))) su</green>";
+    }
+    if (line cap as num > 0) {
+        line out = line out + "  <dark_gray>Network %var(num.round(line st as num)) / %var(num.round(line cap as num)) su</dark_gray>";
+    }
+    return line out;
+}

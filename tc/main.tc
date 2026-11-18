@@ -1,0 +1,114 @@
+// Events, chat commands and the main loop.
+
+declare global cLoopId: num;
+declare global cLastBeat: num;
+
+gameevent startup {
+    rebuildAll();
+    ensureLoop();
+}
+
+playerevent join {
+    packSend();
+    ensureLoop();
+    default.sendMessage(s"<gold>Create</gold> <gray>— type <yellow>@kit</yellow> for the blocks, wrench and goggles, <yellow>@help</yellow> for the rest.");
+    // players already in a proxy are hidden behind their mannequins
+    for (line u of global pMode.getKeys()) {
+        if (global pMode[line u as str] == 1) {
+            default.setEntityHidden(line u as str);
+        }
+    }
+}
+
+playerevent leave {
+    proxyDrop(default.uuid);
+}
+
+playerevent dismount {
+    // shift would drop a proxy player off their stand: it sneaks instead
+    if (inProxy(default.uuid) == 1 && dNum(global pLeaving, default.uuid, 0) == 0) {
+        event.cancel();
+    }
+}
+
+playerevent rightClick {
+    select playersByName(default.uuid);
+    useClick();
+    select reset;
+}
+
+playerevent rightClickEntity {
+    select playersByName(default.uuid);
+    useClick();
+    select reset;
+}
+
+playerevent leftClick {
+    select playersByName(default.uuid);
+    hitClick();
+    select reset;
+}
+
+playerevent damageEntity {
+    // a left click on a block's hitbox
+    event.cancel();
+    select playersByName(default.uuid);
+    hitClick();
+    select reset;
+}
+
+playerevent command {
+    line words = event.command.split(" ");
+    line cmd = (line words[1] as str).replace("@", "");
+    if (line cmd == "kit") {
+        giveKit();
+    } else if (line cmd == "clearcreate") {
+        clearAll();
+        default.sendMessage(s"<gray>Removed every Create block.");
+    } else if (line cmd == "reload") {
+        rebuildAll();
+        default.sendMessage(s"<gray>Rebuilt %var(global kType.len()) blocks.");
+    } else if (line cmd == "pack") {
+        packSend();
+    } else if (line cmd == "stats") {
+        default.sendMessage(s"<gray>%var(global kType.len()) blocks, %var(global netCap.len()) networks, CPU %var(num.round(game.cpuUsage))%.");
+    } else if (line cmd == "help") {
+        default.sendMessage(s"<gold>Create</gold> <gray>commands:");
+        default.sendMessage(s"<yellow>@kit</yellow> <gray>every block, a wrench and goggles");
+        default.sendMessage(s"<gray>Right click a face with a block to place it; left click breaks. Wrench: right click turns a block, sneak + right click picks it up. Goggles (right click to wear) show speed and stress.");
+        default.sendMessage(s"<gray>Hand crank: right click (sneak: backwards). Creative motor: right click for faster, sneak + right click slower. Depot / millstone: right click to put an item in or take it out.");
+        default.sendMessage(s"<yellow>@clearcreate</yellow> <gray>removes every block, <yellow>@reload</yellow> rebuilds them, <yellow>@stats</yellow>, <yellow>@pack</yellow>");
+    }
+}
+
+function ensureLoop {
+    if (game.ticksSinceStartup - global cLastBeat > 5) {
+        start createLoop;
+    }
+}
+
+/** Every tick: networks, machines, and each player's proxy and goggles. */
+process createLoop {
+    global cLoopId += 1;
+    line myId = global cLoopId;
+    repeat {
+        if (global cLoopId != line myId) {
+            break;
+        }
+        global cLastBeat = game.ticksSinceStartup;
+        line tick = global cLastBeat;
+        solveDirty();
+        machinesTick(line tick);
+        for (line u of game.plotPlayerUUIDs) {
+            select playersByName(line u as str);
+            if (game.selectionSize > 0) {
+                proxyTick(line u as str);
+                if (line tick % 4 == 0) {
+                    gogglesTick();
+                }
+            }
+            select reset;
+        }
+        wait;
+    }
+}

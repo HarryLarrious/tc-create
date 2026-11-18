@@ -1,0 +1,214 @@
+{
+ "textures": {
+  "body": "create:block/creative_motor",
+  "cap": "create:block/creative_motor_cap",
+  "particle": "create:block/creative_motor"
+ },
+ "elements": [
+  {
+   "from": [
+    3,
+    0,
+    3
+   ],
+   "to": [
+    13,
+    12,
+    13
+   ],
+   "faces": {
+    "north": {
+     "uv": [
+      3,
+      4,
+      13,
+      16
+     ],
+     "texture": "#body"
+    },
+    "south": {
+     "uv": [
+      3,
+      4,
+      13,
+      16
+     ],
+     "texture": "#body"
+    },
+    "east": {
+     "uv": [
+      3,
+      4,
+      13,
+      16
+     ],
+     "texture": "#body"
+    },
+    "west": {
+     "uv": [
+      3,
+      4,
+      13,
+      16
+     ],
+     "texture": "#body"
+    },
+    "up": {
+     "uv": [
+      3,
+      3,
+      13,
+      13
+     ],
+     "texture": "#cap"
+    },
+    "down": {
+     "uv": [
+      3,
+      3,
+      13,
+      13
+     ],
+     "texture": "#cap"
+    }
+   }
+  },
+  {
+   "from": [
+    2,
+    9,
+    2
+   ],
+   "to": [
+    14,
+    14,
+    14
+   ],
+   "faces": {
+    "north": {
+     "uv": [
+      2,
+      2,
+      14,
+      7
+     ],
+     "texture": "#cap"
+    },
+    "south": {
+     "uv": [
+      2,
+      2,
+      14,
+      7
+     ],
+     "texture": "#cap"
+    },
+    "east": {
+     "uv": [
+      2,
+      2,
+      14,
+      7
+     ],
+     "texture": "#cap"
+    },
+    "west": {
+     "uv": [
+      2,
+      2,
+      14,
+      7
+     ],
+     "texture": "#cap"
+    },
+    "up": {
+     "uv": [
+      2,
+      2,
+      14,
+      14
+     ],
+     "texture": "#cap"
+    },
+    "down": {
+     "uv": [
+      2,
+      2,
+      14,
+      14
+     ],
+     "texture": "#cap"
+    }
+   }
+  },
+  {
+   "from": [
+    1,
+    0,
+    1
+   ],
+   "to": [
+    15,
+    2,
+    15
+   ],
+   "faces": {
+    "north": {
+     "uv": [
+      1,
+      14,
+      15,
+      16
+     ],
+     "texture": "#cap"
+    },
+    "south": {
+     "uv": [
+      1,
+      14,
+      15,
+      16
+     ],
+     "texture": "#cap"
+    },
+    "east": {
+     "uv": [
+      1,
+      14,
+      15,
+      16
+     ],
+     "texture": "#cap"
+    },
+    "west": {
+     "uv": [
+      1,
+      14,
+      15,
+      16
+     ],
+     "texture": "#cap"
+    },
+    "up": {
+     "uv": [
+      1,
+      1,
+      15,
+      15
+     ],
+     "texture": "#cap"
+    },
+    "down": {
+     "uv": [
+      1,
+      1,
+      15,
+      15
+     ],
+     "texture": "#cap"
+    }
+   }
+  }
+ ],
+ "ambientocclusion": false
+}

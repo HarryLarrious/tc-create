@@ -1,0 +1,327 @@
+// Clicking: what the player looks at, placing blocks, the wrench, the
+// goggles, and using machines.
+//
+// Create blocks have no real block to click, so the player's look is traced
+// against their shapes here (and against the world with a raycast); the
+// nearer hit wins. Each block also has an interaction hitbox so a click on
+// it reaches the plot and does not fall through to the world.
+
+declare global iLastUse: dict[num];
+declare global iLastHit: dict[num];
+
+/** The ray from (origin, dir) against box lo..hi: [distance, face] or [] for
+ * a miss (the slab method; face is the direction of the face hit). */
+function rayBox(o: vec, d: vec, lo: vec, hi: vec): list {
+    line tmin = -999999;
+    line tmax = 999999;
+    line face = "";
+    for (line ax of ["x", "y", "z"]) {
+        line a = line ax as str;
+        line od = comp(d, line a);
+        line oo = comp(o, line a);
+        if (num.abs(line od) < 0.000001) {
+            if (line oo < comp(lo, line a) || line oo > comp(hi, line a)) {
+                return [];
+            }
+        } else {
+            line t1 = (comp(lo, line a) - line oo) / line od;
+            line t2 = (comp(hi, line a) - line oo) / line od;
+            line f1 = axisDir(line a, -1);
+            if (line t1 > line t2) {
+                line tt = line t1;
+                line t1 = line t2;
+                line t2 = line tt;
+                line f1 = axisDir(line a, 1);
+            }
+            if (line t1 > line tmin) {
+                line tmin = line t1;
+                line face = line f1;
+            }
+            line tmax = num.min(line tmax, line t2);
+            if (line tmin > line tmax) {
+                return [];
+            }
+        }
+    }
+    if (line tmax < 0) {
+        return [];
+    }
+    return [line tmin, line face];
+}
+
+/** What the selected player looks at within `reach` blocks: [kind, key, face,
+ * distance, point] where kind is "create" (key: the block's key), "world"
+ * (key: the world block's cell) or "" for nothing. */
+function lookHit(reach: num = 5): list {
+    line eye = selected.eyeLocation;
+    line o = vec(line eye.x, line eye.y, line eye.z);
+    line d = line eye.getDirection();
+    // Create blocks along the ray
+    line best = reach + 1;
+    line bestKey = "";
+    line bestFace = "";
+    line seen = {};
+    line steps = num.ceil(reach / 0.1);
+    repeat (line i to line steps) {
+        line p = line o + line d * (line i * 0.1);
+        line cell = keyOfVec(line p);
+        if (global kOwner.hasKey(line cell)) {
+            line own = global kOwner[line cell];
+            if (!line seen.hasKey(line own)) {
+                line seen[line own] = 1;
+                line c = keyVec(line own);
+                for (line b of blockShapes(line own)) {
+                    line bb = line b as list[vec];
+                    line h = rayBox(line o, line d, line c + line bb[1], line c + line bb[2]);
+                    if (line h.len() == 2) {
+                        if ((line h[1] as num) < line best) {
+                            line best = line h[1] as num;
+                            line bestKey = line own;
+                            line bestFace = line h[2] as str;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // the world
+    line hit = game.raycast(line eye, reach, blockCollision="Non-fluid blocks");
+    line hv = vec(line hit.x, line hit.y, line hit.z);
+    line wd = (line hv - line o).len();
+    if (line wd < reach - 0.01 && line wd < line best) {
+        line inside = line hv + line d * 0.001;
+        line cell = vec(num.floor(line inside.x), num.floor(line inside.y), num.floor(line inside.z));
+        // the face: the side of the cell the hit point is on
+        line rel = line hv - line cell;
+        line face = "up";
+        line m = 1;
+        for (line ax of ["x", "y", "z"]) {
+            line a = line ax as str;
+            if (comp(line rel, line a) < line m) {
+                line m = comp(line rel, line a);
+                line face = axisDir(line a, -1);
+            }
+            if (1 - comp(line rel, line a) < line m) {
+                line m = 1 - comp(line rel, line a);
+                line face = axisDir(line a, 1);
+            }
+        }
+        return ["world", keyAt(line cell.x, line cell.y, line cell.z), line face, line wd, line hv];
+    }
+    if (line bestKey != "") {
+        return ["create", line bestKey, line bestFace, line best, line o + line d * line best];
+    }
+    return ["", "", "", 0, line o];
+}
+
+/** How a block of type t is turned when placed against face `face`, for a
+ * player looking along `look`, sneaking or not, against block `against`
+ * ("" for a world block). Returns [axis, facing]. */
+function placeOrient(t: str, face: str, look: vec, sneak: num, against: str): list[str] {
+    line k = blockOrientKind(t);
+    if (k == "facing") {
+        line f = face;
+        if (t == "creative_motor") {
+            // its shaft goes into the block it is placed on
+            line f = dirOpp(face);
+        }
+        if (sneak == 1) {
+            line f = dirOpp(line f);
+        }
+        return [dirAxis(line f), line f];
+    } else if (k == "haxis") {
+        return [dirAxis(hDirOfVec(look)), ""];
+    } else if (k == "none") {
+        return ["y", ""];
+    }
+    if (t == "gearbox") {
+        if (dirAxis(face) == "y") {
+            return [dirAxis(hDirOfVec(look)), ""];
+        }
+        return ["y", ""];
+    }
+    line a = dirAxis(face);
+    // a cogwheel set beside another one takes its axis, so they mesh
+    if (cogKind(t) != "" && against != "") {
+        if (cogKind(typeAt(against)) != "" && axisAt(against) != line a) {
+            line a = axisAt(against);
+        }
+    }
+    return [line a, ""];
+}
+
+/** The selected player right clicks. */
+function useClick {
+    line uuid = selected.uuid;
+    if (dNum(global iLastUse, line uuid, -1) == game.ticksSinceStartup) {
+        return;
+    }
+    global iLastUse[line uuid] = game.ticksSinceStartup;
+    line held = selected.mainHandItem;
+    line blockT = tagOf(line held, "create_block");
+    line tool = toolOf(line held);
+    line sneak = 0;
+    if (selected.isMovementKeyPressed(sneak="Pressed") || selected.isSneaking()) {
+        line sneak = 1;
+    }
+    line hit = lookHit();
+    line kind = line hit[1] as str;
+    line key = line hit[2] as str;
+    line face = line hit[3] as str;
+    if (line tool == "goggles") {
+        selected.setEquipmentItem(line held, slot="Head");
+        selected.setEquipmentItem(item("air"), slot="Main hand");
+        return;
+    }
+    if (line kind == "create" && line tool == "wrench") {
+        if (line sneak == 1) {
+            line t = typeAt(line key);
+            removeBlock(line key);
+            selected.giveItems(kitItem(line t));
+            selected.playSound(snd("Item Pickup", 0.6, 1.2));
+        } else {
+            wrenchTurn(line key);
+            selected.playSound(snd("Wooden Button Click On", 0.6, 1.4));
+        }
+        return;
+    }
+    if (line blockT != "" && line kind != "") {
+        line target = keyStep(line key, line face);
+        line against = "";
+        if (line kind == "create") {
+            line against = line key;
+            // past a shape smaller than its cell, the new block goes in the
+            // cell the face looks into
+            line pt = (line hit[5] as vec) + dirVec(line face) * 0.5;
+            line target = keyOfVec(line pt);
+        }
+        line look = selected.eyeLocation.getDirection();
+        line o = placeOrient(line blockT, line face, line look, line sneak, line against);
+        line tv = keyVec(line target);
+        if (placeBlock(line blockT, line target, line o[1], line o[2]) == 1) {
+            if (selected.gameMode != "creative") {
+                selected.removeItems(line held.setStackSize(1));
+            }
+            allPlayers.playSound(snd("Wood Place", 0.8, 0.9), loc(line tv.x + 0.5, line tv.y + 0.5, line tv.z + 0.5));
+        }
+        return;
+    }
+    if (line kind == "create") {
+        machineUse(line key, line held, line sneak);
+    }
+}
+
+/** 1 if a player box with feet at p overlaps cell `key`. */
+function playerInside(key: str, p: vec): num {
+    line c = keyVec(key);
+    return boxesOverlap(p - vec(0.3, 0, 0.3), p + vec(0.3, 1.8, 0.3), line c, line c + vec(1, 1, 1));
+}
+
+/** Right click on a machine with `held` in hand. */
+function machineUse(key: str, held: item, sneak: num) {
+    line t = typeAt(key);
+    if (line t == "hand_crank") {
+        crankUse(key, sneak);
+    } else if (line t == "creative_motor") {
+        line v = motorStep(key, sneak);
+        selected.sendActionBar(s"<light_purple>Creative Motor</light_purple> <gray>set to</gray> <aqua>%var(line v) RPM</aqua>");
+    } else if (line t == "depot" || line t == "millstone") {
+        line items = itemsAt(key);
+        if (line items.len() > 0 && (line t == "depot" || itemMat(held) == "air")) {
+            if (itemMat(held) == "air" || line t == "millstone") {
+                selected.giveItems(line items[1] as item);
+                global kItems[key] = [];
+                depotDraw(key, "");
+                return;
+            }
+        }
+        if (itemMat(held) != "air" && line items.len() == 0) {
+            if (line t == "millstone" && !millRecipes().hasKey(itemId(held))) {
+                selected.sendActionBar(s"<gray>The millstone can't grind that.");
+                return;
+            }
+            global kItems[key] = [held];
+            selected.setEquipmentItem(item("air"), slot="Main hand");
+            depotDraw(key, "");
+        }
+    } else if (line t == "speedometer" || line t == "stressometer") {
+        selected.sendActionBar(s"%var(kineticReport(key))");
+    }
+}
+
+/** The wrench turns a block: axis x -> y -> z, facings round all six,
+ * the press between x and z. */
+function wrenchTurn(key: str) {
+    line t = typeAt(key);
+    line k = blockOrientKind(line t);
+    if (line k == "none") {
+        return;
+    }
+    line near = netMembersNear(key);
+    if (line k == "facing") {
+        line dirs = allDirs();
+        line i = line dirs.find(global kFace[key]) % 6 + 1;
+        global kFace[key] = line dirs[line i];
+        global kAxis[key] = dirAxis(line dirs[line i]);
+    } else if (line k == "haxis") {
+        if (global kAxis[key] == "x") {
+            global kAxis[key] = "z";
+        } else {
+            global kAxis[key] = "x";
+        }
+    } else {
+        line axes: list[str] = ["x", "y", "z"];
+        global kAxis[key] = line axes[line axes.find(global kAxis[key]) % 3 + 1];
+    }
+    if (line t == "creative_motor") {
+        global kGen[key] = (global kCfg[key] as num) * dirSign(global kFace[key] as str);
+    }
+    saved kSave[key] = "%var(line t) %var(global kAxis[key]) %var(global kFace[key]) %var(global kCfg[key])";
+    eraseBlock(key);
+    drawBlock(key);
+    markDirty(key);
+    for (line n of line near) {
+        markDirty(line n as str);
+    }
+}
+
+/** The selected player left clicks: breaks the Create block they look at. */
+function hitClick {
+    line uuid = selected.uuid;
+    if (dNum(global iLastHit, line uuid, -1) == game.ticksSinceStartup) {
+        return;
+    }
+    global iLastHit[line uuid] = game.ticksSinceStartup;
+    line hit = lookHit();
+    if (line hit[1] != "create") {
+        return;
+    }
+    line key = line hit[2] as str;
+    if (selected.gameMode == "creative") {
+        line c = keyVec(key) + vec(0.5, 0.5, 0.5);
+        allPlayers.displayParticleEffect(par("Block", amount=30, spreadHoriz=0.3, spreadVert=0.3, material=blockMaterial(typeAt(key))), loc(line c.x, line c.y, line c.z));
+        removeBlock(key);
+        return;
+    }
+    popBlock(key);
+}
+
+/** Players wearing or holding goggles (or holding a wrench) read the block
+ * they look at on their action bar (Create's goggle overlay). */
+function gogglesTick {
+    line armor = selected.armorItems;
+    line head = "";
+    for (line a of line armor) {
+        if (toolOf(line a as item) == "goggles") {
+            line head = "goggles";
+        }
+    }
+    line hand = toolOf(selected.mainHandItem);
+    if (line head != "goggles" && line hand != "goggles" && line hand != "wrench") {
+        return;
+    }
+    line hit = lookHit(8);
+    if (line hit[1] == "create") {
+        selected.sendActionBar(s"%var(kineticReport(line hit[2] as str))");
+    }
+}
