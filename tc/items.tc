@@ -68,6 +68,29 @@ function rollResults(spec: str, times: num = 1): list[item] {
     return line out;
 }
 
+/** Adds item `it` to a list of stacks: onto a stack of the same item while
+ * it has room (64), else as a new stack. */
+function stackInto(stacks: list, it: item): list {
+    line out = stacks;
+    line left = it.getStackSize();
+    line id = itemId(it);
+    repeat (line i to line out.len()) {
+        line s = line out[line i] as item;
+        if (line left > 0 && itemId(line s) == line id) {
+            line room = 64 - line s.getStackSize();
+            line add = num.min(line room, line left);
+            if (line add > 0) {
+                line out[line i] = line s.setStackSize(line s.getStackSize() + line add);
+                line left -= line add;
+            }
+        }
+    }
+    if (line left > 0) {
+        line out.append(it.setStackSize(line left));
+    }
+    return line out;
+}
+
 /** Everything a player gets from @kit. */
 function giveKit {
     for (line t of blockTypes()) {
@@ -94,4 +117,10 @@ function tagOf(it: item, name: str): str {
 
 function toolOf(it: item): str {
     return tagOf(it, "create_tool");
+}
+
+/** Styled text from a MiniMessage string built at run time (only the
+ * project's own strings, never player input). */
+function miniMessage(expr: str): txt {
+    return s"%var(expr)".parseExpression(allowed="Style Only");
 }

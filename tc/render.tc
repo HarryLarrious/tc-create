@@ -199,4 +199,8 @@ function eraseAllEntities {
     select entitiesByCondition (entity.hasTag("tccreate"));
     selectedEntity.remove();
     select reset;
+    // proxy stands and mannequins from before a restart
+    select entitiesByCondition (entity.hasTag("tcproxy"));
+    selectedEntity.remove();
+    select reset;
 }

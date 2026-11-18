@@ -3,6 +3,9 @@
 // depot. Timings follow Create (PressingBehaviour, MillstoneBlockEntity,
 // AirCurrent, WaterWheelBlockEntity, HandCrankBlockEntity).
 
+/** A millstone's finished items, waiting to be taken. */
+declare global kOut: dict[list];
+
 /** The item display showing a depot's item. */
 declare global kItemDisp: dict[str];
 
@@ -33,6 +36,12 @@ function machineRemoved(key: str) {
     for (line it of itemsAt(key)) {
         game.spawnItem(line it as item, loc(line c.x, line c.y, line c.z));
     }
+    if (global kOut.hasKey(key)) {
+        for (line it of global kOut[key]) {
+            game.spawnItem(line it as item, loc(line c.x, line c.y, line c.z));
+        }
+        global kOut.remove(key);
+    }
     global kItems.remove(key);
     depotDraw(key, "");
 }
@@ -43,7 +52,7 @@ function machineSpeedChanged(key: str) {
     if (line t == "mechanical_press" && global kSpeed[key] == 0 && global kTimer[key] > 0) {
         // stopped mid-stroke: the head goes back up
         global kTimer[key] = 0;
-        movePart(key, "head", vec(0, 0, 0), 10);
+        movePart(key, "head", vec(0, 0.25, 0), 10);
     }
 }
 
@@ -287,7 +296,7 @@ function depotDraw(key: str, dummy: str) {
     line c = keyVec(key) + vec(0.5, 13.3 / 16, 0.5);
     game.spawnItemDisplay(loc(line c.x, line c.y, line c.z), line items[1] as item);
     lastEntity.setItemDisplayModelType(type="Fixed");
-    lastEntity.setDisplayTransformationMatrix(displayMatrix(upTo("north"), vec(0, 0, 0), 0.5));
+    lastEntity.setDisplayTransformationMatrix(displayMatrix(upTo("north"), vec(0, 0, 0), 1));
     lastEntity.setTag("tccreate", key);
     global kItemDisp[key] = lastEntity.uuid;
 }
@@ -322,7 +331,7 @@ function pressTick(key: str, tick: num) {
         pressApply(key);
     }
     if (line t < 160 && line t2 >= 160) {
-        movePart(key, "head", vec(0, 0, 0), num.max(1, num.ceil(80 / line rate)));
+        movePart(key, "head", vec(0, 0.25, 0), num.max(1, num.ceil(80 / line rate)));
     }
     if (line t2 >= 240) {
         line t2 = 0;
@@ -337,7 +346,7 @@ function pressTarget(key: str): num {
     if (typeAt(line below) == "depot") {
         line items = depotItem(line below);
         if (line items.len() > 0) {
-            if (pressRecipes().hasKey(itemId(line items[1] as item))) {
+            if (pressRecipes().hasKey(itemId(line items[1] as item)) && line items.len() < 4) {
                 return -0.1875;
             }
         }
@@ -380,18 +389,23 @@ function pressApply(key: str) {
         if (line r == "") {
             return;
         }
-        // the whole stack on a depot is pressed one item at a time, the
-        // results stay on the depot (they stack when they are the same)
+        // the stack on a depot is pressed one item at a time; the results
+        // stay on the depot after it (Create's depot output buffer), stacked
         line out = rollResults(line r as str);
         line n = line it.getStackSize();
         allPlayers.displayParticleEffect(par("Item", amount=8, spreadHoriz=0.2, spreadVert=0.05, material=itemMat(line it)), loc(line c.x, line c.y + 0.85, line c.z));
-        if (line n <= 1 && line out.len() > 0) {
-            depotSet(line below, [line out[1]]);
+        line rest = [];
+        for (line i of range(2, line items.len())) {
+            line rest.append(line items[line i as num]);
+        }
+        for (line o of line out) {
+            line rest = stackInto(line rest, line o as item);
+        }
+        if (line n > 1) {
+            line rest.insert(1, line it.setStackSize(line n - 1));
+            depotSet(line below, line rest);
         } else {
-            depotSet(line below, [line it.setStackSize(line n - 1)]);
-            for (line o of line out) {
-                game.spawnItem(line o as item, loc(line c.x, line c.y + 0.9, line c.z), applyMotion="False");
-            }
+            depotSet(line below, line rest);
         }
         return;
     }
@@ -445,7 +459,8 @@ function millTick(key: str, tick: num) {
     if (global kTimer[key] > 0) {
         return;
     }
-    // one input item done: its results come out of the side
+    // one input item done: its results wait inside (Create's output
+    // inventory) until a player takes them
     line out = rollResults(millRecipes()[line id] as str);
     line n = line input.getStackSize();
     if (line n <= 1) {
@@ -453,10 +468,14 @@ function millTick(key: str, tick: num) {
     } else {
         global kItems[key] = [line input.setStackSize(line n - 1)];
     }
-    line side = keyVec(key) + vec(0.5, 0.3, 0.5);
-    for (line o of line out) {
-        game.spawnItem(line o as item, loc(line side.x, line side.y, line side.z));
+    line done = [];
+    if (global kOut.hasKey(key)) {
+        line done = global kOut[key];
     }
+    for (line o of line out) {
+        line done = stackInto(line done, line o as item);
+    }
+    global kOut[key] = line done;
     allPlayers.playSound(snd("Grindstone Use", 0.5, 1.2), loc(line c.x, line c.y, line c.z));
 }
 

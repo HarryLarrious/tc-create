@@ -99,6 +99,24 @@ playerevent command {
         }
     } else if (line cmd == "proxydbg") {
         global pDebug = 1 - global pDebug;
+    } else if (line cmd == "tp") {
+        // @tp x y z [yaw pitch]: for testing
+        line yaw = 0;
+        line pitch = 0;
+        if (line words.len() >= 6) {
+            line yaw = num.parse(line words[5] as str);
+            line pitch = num.parse(line words[6] as str);
+        }
+        if (inProxy(default.uuid) == 1) {
+            select playersByName(default.uuid);
+            proxyRelease(default.uuid);
+            select reset;
+        }
+        default.teleport(loc(num.parse(line words[2] as str), num.parse(line words[3] as str), num.parse(line words[4] as str), line pitch, line yaw));
+    } else if (line cmd == "testkit") {
+        // a hotbar for trying the machines
+        default.clearInventory();
+        default.setHotbarItems(item("iron_ingot", 16), item("wheat", 16), toolItem("goggles"), toolItem("wrench"), item("cobblestone", 16), item("air"), kitItem("shaft"), kitItem("cogwheel"), kitItem("gearbox"));
     } else if (line cmd == "pack") {
         packSend();
     } else if (line cmd == "stats") {

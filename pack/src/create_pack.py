@@ -474,9 +474,10 @@ def press_parts(casing, port, inner, head):
             ICONS["mechanical_press"] = m.write("icon")
         else:
             PARTS["press"] = m.write()
-    # the head: a pole and a plate; at rest its plate is in the casing
+    # the head: a plate and a pole; the plot raises it 4 px to rest inside
+    # the casing and lowers it onto the depot or the ground below
     h = Model("press_head", tx)
-    h.box((5, 4, 5), (11, 16, 11), "#head")
+    h.box((5, 4, 5), (11, 12, 11), "#head")
     h.box((3, 0, 3), (13, 4, 13), "#head")
     PARTS["press_head"] = h.write()
 

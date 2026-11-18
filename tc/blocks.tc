@@ -227,7 +227,7 @@ function blockParts(key: str): list {
     } else if (line t == "water_wheel" || line t == "large_water_wheel") {
         return [[line t, line a, 1, 0, line m, line z, ""], ["shaft", line a, 1, 0, line m, line z, ""]];
     } else if (line t == "mechanical_press") {
-        return [["press", "", 0, 0, line m, line z, ""], ["shaft", line a, 1, 0, alongAxis(line a), line z, ""], ["press_head", "", 0, 0, line m, line z, "head"]];
+        return [["press", "", 0, 0, line m, line z, ""], ["shaft", line a, 1, 0, alongAxis(line a), line z, ""], ["press_head", "", 0, 0, line m, vec(0, 0.25, 0), "head"]];
     } else if (line t == "millstone") {
         return [["millstone_base", "", 0, 0, line m, line z, ""], ["millstone", "y", 1, 0, line m, line z, ""]];
     } else if (line t == "encased_fan") {

@@ -141,14 +141,14 @@ function clipMove(boxes: list, lo: vec, hi: vec, a: str, d: num): num {
         line ok = 1;
         for (line o of crossAxes(a)) {
             line oa = line o as str;
-            if (comp(lo, line oa) >= comp(line bhi, line oa) - 0.0001 || comp(hi, line oa) <= comp(line blo, line oa) + 0.0001) {
+            if (comp(lo, line oa) >= comp(line bhi, line oa) - 0.001 || comp(hi, line oa) <= comp(line blo, line oa) + 0.001) {
                 line ok = 0;
             }
         }
         if (line ok == 1) {
-            if (line out > 0 && comp(hi, a) <= comp(line blo, a) + 0.0001) {
+            if (line out > 0 && comp(hi, a) <= comp(line blo, a) + 0.001) {
                 line out = num.min(line out, comp(line blo, a) - comp(hi, a));
-            } else if (line out < 0 && comp(lo, a) >= comp(line bhi, a) - 0.0001) {
+            } else if (line out < 0 && comp(lo, a) >= comp(line bhi, a) - 0.001) {
                 line out = num.max(line out, comp(line bhi, a) - comp(lo, a));
             }
         }
@@ -290,7 +290,7 @@ function proxyEnter(uuid: str, p: vec) {
     lastEntity.setInvulnerable(invulnerable="Enable");
     lastEntity.setTag("tcproxy", uuid);
     line stand = lastEntity.uuid;
-    game.spawnMannequin(uuid, loc(line q.x, line q.y, line q.z, line yaw, 0), movable="False", mainHand="Right Hand");
+    game.spawnMannequin(uuid, loc(line q.x, line q.y, line q.z, 0, line yaw), movable="False", mainHand="Right Hand");
     lastEntity.setInvulnerable(invulnerable="Enable");
     lastEntity.setGravity(gravity="Disable");
     lastEntity.setTag("tcproxy", uuid);
@@ -335,7 +335,7 @@ function proxyLeave(uuid: str) {
     selected.rideEntity();
     line yaw = selected.location.getCoordinate(coord="Yaw");
     line pitch = selected.location.getCoordinate(coord="Pitch");
-    selected.teleport(loc(p.x, p.y, p.z, line yaw, line pitch), keepRot="True");
+    selected.teleport(loc(p.x, p.y, p.z, line pitch, line yaw), keepRot="True");
     selected.setVelocity(line v);
     selected.setFallDistance(0);
     selected.removePotionEffect(pot("Invisibility"));
@@ -350,6 +350,21 @@ function proxyLeave(uuid: str) {
     global pMode[uuid] = 0;
     global pStand.remove(uuid);
     global pBody.remove(uuid);
+}
+
+/** Ends the selected player's proxy without moving them. */
+function proxyRelease(uuid: str) {
+    global pMode[uuid] = 0;
+    selected.rideEntity();
+    selected.removePotionEffect(pot("Invisibility"));
+    line ids = [global pStand[uuid], global pBody[uuid]];
+    select playersByCondition (!player.nameEquals(uuid));
+    selected.setEntityHidden(uuid, hidden="Disable");
+    for (line id of line ids) {
+        select entitiesByName(line id as str);
+        selectedEntity.remove();
+    }
+    select playersByName(uuid);
 }
 
 /** A player who leaves the plot while in a proxy: clean up its entities. */
@@ -368,6 +383,12 @@ function proxyDrop(uuid: str) {
 /** One physics tick of the selected player's proxy. */
 function proxyStep(uuid: str) {
     line p = global pPos[uuid];
+    // teleported away (a command, a respawn): drop the proxy where they are
+    line now = selected.location;
+    if (global pTicks[uuid] > 3 && (vec(now.x, now.y, now.z) - line p).len() > 4) {
+        proxyRelease(uuid);
+        return;
+    }
     line v = global pVel[uuid];
     line ground = global pGround[uuid];
     global pTicks[uuid] += 1;
@@ -423,9 +444,9 @@ function proxyStep(uuid: str) {
     line r = sweep(line boxes, line p, line v);
     line q = line r[1] as vec;
     line moved = line r[2] as vec;
-    line hitX = num.abs(line moved.x - line v.x) > 0.0001;
-    line hitZ = num.abs(line moved.z - line v.z) > 0.0001;
-    line hitY = num.abs(line moved.y - line v.y) > 0.0001;
+    line hitX = num.abs(line moved.x - line v.x) > 0.001;
+    line hitZ = num.abs(line moved.z - line v.z) > 0.001;
+    line hitY = num.abs(line moved.y - line v.y) > 0.001;
     line landed = line hitY && line v.y < 0;
     if ((line hitX || line hitZ) && (line ground == 1 || line landed)) {
         // try again 0.6 higher, then back down
@@ -437,8 +458,8 @@ function proxyStep(uuid: str) {
         line d2 = vec(line q2.x - line p.x, 0, line q2.z - line p.z).len();
         if (line d2 > line d1 + 0.001) {
             line q = line q2;
-            line hitX = num.abs((line q2.x - line p.x) - line v.x) > 0.0001;
-            line hitZ = num.abs((line q2.z - line p.z) - line v.z) > 0.0001;
+            line hitX = num.abs((line q2.x - line p.x) - line v.x) > 0.001;
+            line hitZ = num.abs((line q2.z - line p.z) - line v.z) > 0.001;
             line landed = 1;
         }
     }
@@ -481,7 +502,7 @@ function proxyStep(uuid: str) {
     }
     selectedEntity.teleport(loc(line q.x, line q.y - global pRide[uuid], line q.z));
     select entitiesByName(global pBody[uuid]);
-    selectedEntity.teleport(loc(line q.x, line q.y, line q.z, line yaw, line look.getCoordinate(coord="Pitch")));
+    selectedEntity.teleport(loc(line q.x, line q.y, line q.z, line look.getCoordinate(coord="Pitch"), line yaw));
     if ((line sneak as num) != global pSneak[uuid]) {
         global pSneak[uuid] = line sneak;
         if (line sneak) {

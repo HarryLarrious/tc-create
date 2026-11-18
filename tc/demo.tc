@@ -3,6 +3,8 @@
 //   motor > shaft > speedometer > gearbox > shaft > cog > shaft > press > shaft > stressometer
 //   the gearbox also drives a fan (north); the cog meshes with a cog above
 //   it and that with a large cog; the press works on a depot under it.
+//   Three blocks south: a motor under a millstone, and a hand crank on a
+//   speedometer (each its own network).
 
 function buildDemo {
     line l = default.location;
@@ -24,6 +26,8 @@ function buildDemo {
     placeBlock("depot", keyAt(line ox + 7, line oy, line oz), "y", "");
     placeBlock("shaft", keyAt(line ox + 8, line y, line oz), "x", "");
     placeBlock("stressometer", keyAt(line ox + 9, line y, line oz), "x", "");
-    placeBlock("hand_crank", keyAt(line ox + 10, line y, line oz), "x", "east");
-    placeBlock("millstone", keyAt(line ox + 1, line oy, line oz + 3), "y", "");
+    placeBlock("creative_motor", keyAt(line ox + 1, line oy, line oz + 3), "y", "up");
+    placeBlock("millstone", keyAt(line ox + 1, line oy + 1, line oz + 3), "y", "");
+    placeBlock("speedometer", keyAt(line ox + 4, line oy, line oz + 3), "y", "");
+    placeBlock("hand_crank", keyAt(line ox + 4, line oy + 1, line oz + 3), "y", "up");
 }

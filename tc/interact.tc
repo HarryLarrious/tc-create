@@ -19,7 +19,7 @@ function rayBox(o: vec, d: vec, lo: vec, hi: vec): list {
         line a = line ax as str;
         line od = comp(d, line a);
         line oo = comp(o, line a);
-        if (num.abs(line od) < 0.000001) {
+        if (num.abs(line od) < 0.001) {
             if (line oo < comp(lo, line a) || line oo > comp(hi, line a)) {
                 return [];
             }
@@ -230,11 +230,19 @@ function machineUse(key: str, held: item, sneak: num) {
     } else if (line t == "creative_motor") {
         line v = motorStep(key, sneak);
         selected.sendActionBar(s"<light_purple>Creative Motor</light_purple> <gray>set to</gray> <aqua>%var(v) RPM</aqua>");
+    } else if (line t == "millstone" && itemMat(held) == "air" && global kOut.hasKey(key)) {
+        // an empty hand takes the millstone's results
+        for (line it of global kOut[key]) {
+            selected.giveItems(line it as item);
+        }
+        global kOut.remove(key);
     } else if (line t == "depot" || line t == "millstone") {
         line items = itemsAt(key);
         if (line items.len() > 0 && (line t == "depot" || itemMat(held) == "air")) {
             if (itemMat(held) == "air" || line t == "millstone") {
-                selected.giveItems(line items[1] as item);
+                for (line it of line items) {
+                    selected.giveItems(line it as item);
+                }
                 global kItems[key] = [];
                 depotDraw(key, "");
                 return;
@@ -251,7 +259,7 @@ function machineUse(key: str, held: item, sneak: num) {
         }
     } else if (line t == "speedometer" || line t == "stressometer") {
         line rep = kineticReport(key);
-        selected.sendActionBar(s"%var(rep)");
+        selected.sendActionBar(miniMessage(line rep));
     }
 }
 
@@ -329,6 +337,6 @@ function gogglesTick {
     line hit = lookHit(8);
     if (line hit[1] == "create") {
         line rep = kineticReport(line hit[2] as str);
-        selected.sendActionBar(s"%var(rep)");
+        selected.sendActionBar(miniMessage(line rep));
     }
 }

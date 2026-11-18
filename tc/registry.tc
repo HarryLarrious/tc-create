@@ -106,7 +106,7 @@ function popBlock(key: str, why: str = "") {
     allPlayers.playSound(snd("Wood Break", 1, 0.9), line at);
     game.spawnItem(kitItem(line t), line at);
     if (why != "") {
-        allPlayers.sendActionBar(s"%var(why)");
+        allPlayers.sendActionBar(miniMessage(why));
     }
     removeBlock(key);
 }
